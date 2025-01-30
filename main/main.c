@@ -321,6 +321,7 @@ ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream) {
             size_t new_size = *n * 2;
             char *new_lineptr = (char *)realloc(*lineptr, new_size);
             if (new_lineptr == NULL) {
+                free(*lineptr);
                 return -1;
             }
             *lineptr = new_lineptr;
@@ -341,17 +342,17 @@ ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream) {
 }
 
 // Read config files function
-static void read_config_files(void)
-{
-    ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are starting a WiFi connection.");
+static void read_config_files(void) {
+    ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB because we are starting a WiFi connection.");
     color = 1;
     keep_blinking = true;
+
     // Inicializar SPIFFS
     esp_vfs_spiffs_conf_t conf = {
-      .base_path = "/spiffs",
-      .partition_label = NULL,
-      .max_files = 5,
-      .format_if_mount_failed = true
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true
     };
 
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
@@ -359,42 +360,28 @@ static void read_config_files(void)
     if (ret != ESP_OK) {
         ESP_LOGE(SPIFF, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
         return;
-    } else {
-        ESP_LOGI(SPIFF, "Success to initialize SPIFFS");
-    }
-
-    // Formatear SPIFFS si el montaje falla
-    if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_NOT_FOUND) {
-        ESP_LOGW(SPIFF, "Mount failed, formatting...");
-        esp_spiffs_format(NULL);
-        ret = esp_vfs_spiffs_register(&conf);
-        if (ret != ESP_OK) {
-            ESP_LOGE(SPIFF, "Failed to format SPIFFS (%s)", esp_err_to_name(ret));
-            return;
-        } else {
-            ESP_LOGI(SPIFF, "Success to format SPIFFS");
-        }
     }
 
     FILE* f = fopen(FILE_PATH, "r");
     if (f == NULL) {
         ESP_LOGE(SPIFF, "Failed to open file for reading");
+        esp_vfs_spiffs_unregister(conf.partition_label);
         return;
-    } else {
-    ESP_LOGI(SPIFF, "File opened successfully");
     }
 
     char *line = NULL;
     size_t len = 0;
     ssize_t read;
+    int line_number = 0;
 
     while ((read = custom_getline(&line, &len, f)) != -1) {
+        line_number++;
         if (sscanf(line, "SSID=%31s", ssid) == 1) {
-            ESP_LOGI(SPIFF, "SSID: %s", ssid);
+            ESP_LOGI(SPIFF, "Line %d: SSID: %s", line_number, ssid);
         } else if (sscanf(line, "PASSWORD=%63s", password) == 1) {
-            ESP_LOGI(SPIFF, "PASSWORD: %s", password);
+            ESP_LOGI(SPIFF, "Line %d: PASSWORD: %s", line_number, password);
         } else if (sscanf(line, "PORT=%d", &port) == 1) {
-            ESP_LOGI(SPIFF, "PORT: %d", port);
+            ESP_LOGI(SPIFF, "Line %d: PORT: %d", line_number, port);
         }
     }
 
