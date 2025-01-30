@@ -6,6 +6,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "led_strip.h"
 #include "nvs_flash.h"
 #include "esp_spiffs.h"
@@ -29,8 +30,12 @@ static led_strip_handle_t led_strip;
 static int color = 0;
 
 // Values for WiFi connection
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
 #define FILE_PATH "/spiffs/wifi_config.txt"
-static const uint16_t MAX_APs = 25;
+static const int MAX_RETRY = 3;
+static EventGroupHandle_t s_wifi_event_group;
+static int s_retry_num = 0;
 static char ssid[32];
 static char password[64];
 static int port;
@@ -40,9 +45,8 @@ static void configure_Led_Strip();
 static void blinkLedTask(void *param);
 static void blink_Led();
 static void getChipInfo();
-static void init_wifi_driver();
-static void wifi_scan();
-static void connect_to_wifi();
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+static void wifi_init_sta();
 ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream);
 static void read_config_files();
 static void udp_server_task(void *pvParameters);
@@ -60,17 +64,11 @@ void app_main(void)
     // Mostrar información sobre el chip
     getChipInfo();
 
-    // Inicialización de WiFi
-    init_wifi_driver();
-
     // Leer configuraciones desde SPIFFS
     read_config_files();
 
-    // Escanear redes WiFi
-    wifi_scan();
-
-    // Conectar a WiFi
-    connect_to_wifi();
+    // Inicialización de WiFi
+    wifi_init_sta();
 
     // Tarea del servidor UDP
     xTaskCreate(udp_server_task, "udp_server_task", 4096, NULL, 5, NULL);
@@ -163,7 +161,7 @@ static void getChipInfo(void)
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        ESP_LOGI(ERROR, "Get flash size failed");
+        ESP_LOGE(ERROR, "Get flash size failed");
         return;
     }
 
@@ -178,75 +176,95 @@ static void getChipInfo(void)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 }
 
-static void init_wifi_driver(void)
-{
-    ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are starting a WiFi connection.");
-    color = 1;
-    keep_blinking = true;
-    // Inicializar NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+// Manejador de eventos WiFi
+static void event_handler(void* arg, esp_event_base_t event_base,
+                          int32_t event_id, void* event_data) {
+    static wifi_ap_record_t ap_info[20]; // Asegúrate de que el tamaño sea adecuado para tus necesidades
+    static uint16_t ap_count = 0;
+
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
+            case WIFI_EVENT_STA_START:
+                ESP_LOGI(WIFI, "WiFi started, scanning...");
+                esp_wifi_scan_start(NULL, false);
+                break;
+            case WIFI_EVENT_SCAN_DONE:
+                ESP_LOGI(WIFI, "Scan done");
+                esp_wifi_scan_get_ap_num(&ap_count);
+                esp_wifi_scan_get_ap_records(&ap_count, ap_info);
+
+                // Mostrar los SSID encontrados
+                ESP_LOGI(WIFI, "Scanning results:");
+                for (int i = 0; i < ap_count; i++) {
+                    ESP_LOGI(WIFI, "SSID %d: %s, RSSI: %d dBm", i + 1, ap_info[i].ssid, ap_info[i].rssi);
+                }
+
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                // Verificar si el SSID deseado está en la lista de redes escaneadas
+                bool ssid_found = false;
+                for (int i = 0; i < ap_count; i++) {
+                    if (strcmp((char*)ap_info[i].ssid, ssid) == 0) {
+                        ssid_found = true;
+                        break;
+                    }
+                }
+
+                if (ssid_found) {
+                    ESP_LOGI(WIFI, "SSID found, connecting...");
+                    vTaskDelay(2000 / portTICK_PERIOD_MS);
+                    esp_wifi_connect();
+                } else {
+                    ESP_LOGE(WIFI, "SSID not found in scan results");
+                }
+                break;
+            case WIFI_EVENT_STA_DISCONNECTED:
+                if (s_retry_num < MAX_RETRY) {
+                    ESP_LOGW(WIFI, "Retrying connection... (%d/%d)", ++s_retry_num, MAX_RETRY);
+                    ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we finished the WiFi connection.");
+                    color = 1;
+                    keep_blinking = true;
+                    esp_wifi_connect();
+                } else {
+                    xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+                }
+                break;
+            default:
+                break;
+        }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(WIFI, "Connected! IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we finished the WiFi connection.");
+        color = 1;
+        keep_blinking = false;
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        s_retry_num = 0;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
-    ESP_ERROR_CHECK(ret);
+}
 
-    // Inicializar el stack de TCP/IP
+// Inicialización del WiFi en modo estación (STA)
+static void wifi_init_sta(void) {
+    s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
-
-    // Crear evento loop para manejar eventos WiFi
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    // Inicializar WiFi
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
-
+    esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    // Configurar WiFi en modo estación (station mode)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
+    esp_event_handler_instance_t instance_any_id, instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_got_ip));
 
-static void wifi_scan(void)
-{
-    // Iniciar escaneo de WiFi
-    wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true
-    };
-
-    bool ssid_found = false;
-
-    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
-
-    // Obtener resultados del escaneo
-    wifi_ap_record_t ap_info[MAX_APs];
-    uint16_t number = MAX_APs;
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&number, ap_info));
-    ESP_LOGI(WIFI, "Total Wifi Access Points: %u", number);
-
-    for (int i = 0; i < number; i++) {
-        ESP_LOGI(WIFI, "SSID: %s, RSSI: %d", ap_info[i].ssid, ap_info[i].rssi);
-        if (strcmp((char *)ap_info[i].ssid, ssid) == 0)
-            ssid_found = true;
-    }
-
-    ESP_LOGI(WIFI, "Wifi scan finished.");
-
-    if (!ssid_found) {
-        ESP_LOGI(WIFI, "SSID '%s' not found in the scan results.\nRestarting execution in 10 seconds.", ssid);
-        vTaskDelay(10000 / portTICK_PERIOD_MS); // Esperar un momento para que el log se registre
-        esp_restart(); // Reiniciar el ESP32-C6
-    } else
-        ESP_LOGI(WIFI, "SSID '%s' found in the scan results.", ssid);
-}
-
-static void connect_to_wifi(void)
-{
+    // Configuración del WiFi con SSID y contraseña
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = "",
@@ -254,54 +272,31 @@ static void connect_to_wifi(void)
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
-
-    // Copiar SSID y contraseña leídos del archivo de configuración
     strcpy((char*)wifi_config.sta.ssid, ssid);
     strcpy((char*)wifi_config.sta.password, password);
 
-    int retry_count = 0;
-    const int max_retries = 3;
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
-    while (retry_count < max_retries) {
-        ESP_LOGI(WIFI, "Trying to connect to %s with password: %s", ssid,password);
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-        ESP_ERROR_CHECK(esp_wifi_connect());
-
-        // Esperar a obtener una IP
-        esp_netif_ip_info_t ip_info;
-        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-        if (netif == NULL) {
-            ESP_LOGE(WIFI, "Failed to get network interface handle");
-            return;
-        }
-
-        if (!esp_netif_is_netif_up(netif)) {
-            ESP_LOGI(WIFI, "Waiting for IP...");
-            vTaskDelay(10000 / portTICK_PERIOD_MS); // Esperar un poco para obtener una IP
-        }
-
-        ESP_ERROR_CHECK(esp_netif_get_ip_info(netif, &ip_info));
-        if (ip_info.ip.addr != 0) {
-            uint8_t mac[6];
-            ESP_ERROR_CHECK(esp_netif_get_mac(netif, mac));
-            
-            // Imprimir IP y MAC
-            ESP_LOGI(INFO, "IP Address: " IPSTR, IP2STR(&ip_info.ip));
-            ESP_LOGI(INFO, "MAC Address: %02x:%02x:%02x:%02x:%02x:%02x",
-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-            keep_blinking = false;
-            ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we finished WiFi connection.");
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
-            return; // Salir si se obtiene una IP
-        }
-
-        ESP_LOGI(WIFI, "Failed to connect. Retrying... (%d/%d)", retry_count + 1, max_retries);
-        retry_count++;
+    // Espera hasta que el dispositivo se conecte o falle la conexión
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE,
+                                           pdFALSE,
+                                           portMAX_DELAY);
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(WIFI, "Successfully connected to WiFi");
+        ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we finished the WiFi connection.");
+        color = 1;
+        keep_blinking = false;
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGE(WIFI, "Failed to connect to WiFi");
     }
-
-    ESP_LOGI(WIFI, "Failed to connect after %d attempts. Restarting in 10 seconds...", max_retries);
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
-    esp_restart();
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
+    vEventGroupDelete(s_wifi_event_group);
 }
 
 // Custom read line function
@@ -348,6 +343,9 @@ ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream) {
 // Read config files function
 static void read_config_files(void)
 {
+    ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are starting a WiFi connection.");
+    color = 1;
+    keep_blinking = true;
     // Inicializar SPIFFS
     esp_vfs_spiffs_conf_t conf = {
       .base_path = "/spiffs",
@@ -359,7 +357,7 @@ static void read_config_files(void)
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
 
     if (ret != ESP_OK) {
-        ESP_LOGI(SPIFF, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        ESP_LOGE(SPIFF, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
         return;
     } else {
         ESP_LOGI(SPIFF, "Success to initialize SPIFFS");
@@ -380,7 +378,7 @@ static void read_config_files(void)
 
     FILE* f = fopen(FILE_PATH, "r");
     if (f == NULL) {
-        ESP_LOGI(SPIFF, "Failed to open file for reading");
+        ESP_LOGE(SPIFF, "Failed to open file for reading");
         return;
     } else {
     ESP_LOGI(SPIFF, "File opened successfully");
