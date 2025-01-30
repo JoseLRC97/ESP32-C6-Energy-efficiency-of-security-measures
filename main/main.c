@@ -116,24 +116,16 @@ static void blinkLedTask(void *param)
 // Led Strip Blink Function
 static void blink_Led()
 {
-    /* If the addressable LED is enabled */
     if (s_led_state && color == 0) {
-        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
         led_strip_set_pixel(led_strip, 0, 0, 20, 0);
-        /* Refresh the strip to send data */
         led_strip_refresh(led_strip);
     } else if (s_led_state && color == 1) {
-        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
         led_strip_set_pixel(led_strip, 0, 0, 0, 20);
-        /* Refresh the strip to send data */
         led_strip_refresh(led_strip);
     } else if (s_led_state && color == 2) {
-        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
-        led_strip_set_pixel(led_strip, 0, 20, 20, 0); // Amarillo: Rojo + Verde
-        /* Refresh the strip to send data */
+        led_strip_set_pixel(led_strip, 0, 20, 20, 0);
         led_strip_refresh(led_strip);
     } else {
-        /* Set all LED off to clear all pixels */
         led_strip_clear(led_strip);
     }
 }
@@ -172,14 +164,14 @@ static void getChipInfo(void)
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     ESP_LOGI(LIGHT, "Stoping blinking GPIO Led becasue we finished of give information of the chip.");
-    keep_blinking = false; // Stop blink LED
+    keep_blinking = false;
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 }
 
-// Manejador de eventos WiFi
+// WiFi event handler
 static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data) {
-    static wifi_ap_record_t ap_info[20]; // Asegúrate de que el tamaño sea adecuado para tus necesidades
+    static wifi_ap_record_t ap_info[25];
     static uint16_t ap_count = 0;
 
     if (event_base == WIFI_EVENT) {
@@ -193,14 +185,12 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                 esp_wifi_scan_get_ap_num(&ap_count);
                 esp_wifi_scan_get_ap_records(&ap_count, ap_info);
 
-                // Mostrar los SSID encontrados
                 ESP_LOGI(WIFI, "Scanning results:");
                 for (int i = 0; i < ap_count; i++) {
                     ESP_LOGI(WIFI, "SSID %d: %s, RSSI: %d dBm", i + 1, ap_info[i].ssid, ap_info[i].rssi);
                 }
 
                 vTaskDelay(2000 / portTICK_PERIOD_MS);
-                // Verificar si el SSID deseado está en la lista de redes escaneadas
                 bool ssid_found = false;
                 for (int i = 0; i < ap_count; i++) {
                     if (strcmp((char*)ap_info[i].ssid, ssid) == 0) {
@@ -243,7 +233,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-// Inicialización del WiFi en modo estación (STA)
+// Start WiFi en mode station (STA)
 static void wifi_init_sta(void) {
     s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
@@ -264,7 +254,6 @@ static void wifi_init_sta(void) {
                                                         NULL,
                                                         &instance_got_ip));
 
-    // Configuración del WiFi con SSID y contraseña
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = "",
@@ -279,7 +268,6 @@ static void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // Espera hasta que el dispositivo se conecte o falle la conexión
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                                            pdFALSE,
@@ -309,7 +297,7 @@ ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream) {
     int c;
 
     if (*lineptr == NULL) {
-        *n = 128; // Tamaño inicial
+        *n = 128;
         *lineptr = (char *)malloc(*n);
         if (*lineptr == NULL) {
             return -1;
@@ -390,6 +378,7 @@ static void read_config_files(void) {
     esp_vfs_spiffs_unregister(conf.partition_label);
 }
 
+// UDP Server Task
 static void udp_server_task(void *pvParameters)
 {
     char rx_buffer[128];
