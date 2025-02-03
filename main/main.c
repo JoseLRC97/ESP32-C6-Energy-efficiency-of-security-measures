@@ -381,7 +381,7 @@ static void read_config_files(void) {
 // UDP Server Task
 static void udp_server_task(void *pvParameters)
 {
-    char rx_buffer[128];
+    char rx_buffer[256];
     char addr_str[128];
     int addr_family;
     int ip_protocol;
@@ -440,3 +440,4 @@ static void udp_server_task(void *pvParameters)
     }
     vTaskDelete(NULL);
 }
+
