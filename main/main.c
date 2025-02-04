@@ -14,6 +14,7 @@
 #include "lwip/sockets.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+#include "cJSON.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -21,6 +22,8 @@ static const char *LIGHT = "Light";
 static const char *ERROR = "Error";
 static const char *WIFI = "Wifi";
 static const char *SPIFF = "Spiff";
+static const char *UDP = "Server UDP";
+static const char *TEST = "Test";
 
 // Values for GPIO Led Strip RGB
 #define BLINK_GPIO GPIO_NUM_8
@@ -40,6 +43,9 @@ static char ssid[32];
 static char password[64];
 static int port;
 
+// Values for UDP Server
+#define BUFFER_SIZE 512
+
 // Function declarations
 static void configure_Led_Strip();
 static void blinkLedTask(void *param);
@@ -50,6 +56,7 @@ static void wifi_init_sta();
 ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream);
 static void read_config_files();
 static void udp_server_task(void *pvParameters);
+static void execute_test(cJSON *json);
 
 // Main Function
 void app_main(void)
@@ -124,6 +131,9 @@ static void blink_Led()
         led_strip_refresh(led_strip);
     } else if (s_led_state && color == 2) {
         led_strip_set_pixel(led_strip, 0, 20, 20, 0);
+        led_strip_refresh(led_strip);
+    } else if (s_led_state && color == 3) {
+        led_strip_set_pixel(led_strip, 0, 20, 0, 0);
         led_strip_refresh(led_strip);
     } else {
         led_strip_clear(led_strip);
@@ -381,7 +391,7 @@ static void read_config_files(void) {
 // UDP Server Task
 static void udp_server_task(void *pvParameters)
 {
-    char rx_buffer[256];
+    char rx_buffer[BUFFER_SIZE];
     char addr_str[128];
     int addr_family;
     int ip_protocol;
@@ -399,20 +409,20 @@ static void udp_server_task(void *pvParameters)
             ESP_LOGE(ERROR, "Unable to create socket: errno %d", errno);
             break;
         }
-        ESP_LOGI(INFO, "Socket created");
+        ESP_LOGI(UDP, "Socket created");
 
         int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err < 0) {
             ESP_LOGE(ERROR, "Socket unable to bind: errno %d", errno);
             break;
         }
-        ESP_LOGI(INFO, "Socket bound, port %d", port);
+        ESP_LOGI(UDP, "Socket bound, port %d", port);
         color = 2;
         keep_blinking = true;
         ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are waiting data.");
 
         while (1) {
-            ESP_LOGI(INFO, "Waiting for data");
+            ESP_LOGI(UDP, "Waiting for data");
 
             struct sockaddr_in source_addr;
             socklen_t socklen = sizeof(source_addr);
@@ -420,24 +430,72 @@ static void udp_server_task(void *pvParameters)
 
             // Error occurred during receiving
             if (len < 0) {
-                ESP_LOGE(ERROR, "recvfrom failed: errno %d", errno);
+                ESP_LOGE(UDP, "recvfrom failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-                ESP_LOGI(INFO, "Received %d bytes from %s:", len, addr_str);
+                ESP_LOGI(UDP, "Received %d bytes from %s:", len, addr_str);
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-                ESP_LOGI(INFO, "%s", rx_buffer);
+                ESP_LOGI(UDP, "%s", rx_buffer);
+
+                cJSON *json = cJSON_Parse(rx_buffer);
+                if (json == NULL) {
+                    ESP_LOGE(UDP, "Error parsing JSON");
+                } else {
+                    cJSON *test_type = cJSON_GetObjectItem(json, "test-type");
+                    if (cJSON_IsString(test_type) && (test_type->valuestring != NULL)) {
+                        execute_test(json);
+                    } else {
+                        ESP_LOGW(UDP, "Missing or invalid 'test-type' field");
+                    }
+
+                    // Liberar la memoria del JSON
+                    cJSON_Delete(json);
+                }
             }
         }
 
         if (sock != -1) {
             ESP_LOGE(ERROR, "Shutting down socket and restarting...");
             shutdown(sock, 0);
-            close(sock);
+                close(sock);
         }
     }
     vTaskDelete(NULL);
 }
 
+static void execute_test(cJSON *json)
+{
+    ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are checking the test type");
+    color = 3;
+    keep_blinking = true;
+    ESP_LOGI(TEST, "Checking type of test");
+    cJSON *test_type = cJSON_GetObjectItem(json, "test-type");
+    if (strcmp(test_type->valuestring, "Encryption-and-hashing") == 0) {
+        ESP_LOGI(TEST, "Encryption and Hashing test detected");
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        cJSON *data = cJSON_GetObjectItem(json, "data");
+        if (data && cJSON_IsObject(data)) {  // Verificar que "data" sea un objeto
+                char *data_string = cJSON_PrintUnformatted(data); // Convertir el JSON a string
+                if (data_string) {
+                    ESP_LOGI(TEST, "Data to Encrypt and Hash: %s", data_string);
+                    vTaskDelay(2000 / portTICK_PERIOD_MS);
+                    ESP_LOGI(TEST, "Executing Encryption and Hashing Test in 3 seconds");
+                    vTaskDelay(3000 / portTICK_PERIOD_MS);
+
+                    // Call to Encryption and Hashing Tests
+
+                    free(data_string);
+                    free(test_type);
+                } else {
+                    ESP_LOGE(TEST, "Failed to print JSON data.");
+                }
+            } else {
+                ESP_LOGW(TEST, "Missing or invalid 'data' field");
+            }
+    } else {
+        ESP_LOGW(TEST, "Unknow type of test");
+    }
+}
