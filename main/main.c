@@ -15,6 +15,7 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "cJSON.h"
+#include "mbedtls/aes.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -44,11 +45,15 @@ static char password[64];
 static int port;
 
 // Values for UDP Server
+static TaskHandle_t udp_server_task_handle;
 #define BUFFER_SIZE 512
+
+// Values for AES Tests
+#define BLOCK_SIZE 16  // AES Size
 
 // Function declarations
 static void configure_Led_Strip();
-static void blinkLedTask(void *param);
+static void blinkLedTask(void *pvParameters);
 static void blink_Led();
 static void getChipInfo();
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
@@ -56,7 +61,11 @@ static void wifi_init_sta();
 ssize_t custom_getline(char **lineptr, size_t *n, FILE *stream);
 static void read_config_files();
 static void udp_server_task(void *pvParameters);
-static void execute_test(cJSON *json);
+static void select_test(cJSON *json);
+static void encrypt_hash_tests(const char *data_string);
+static void log_test_info(int iteration, unsigned char *crypt_data, int key_size);
+static void apply_pkcs7_padding(unsigned char *input, size_t *input_len, size_t block_size);
+static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -78,7 +87,7 @@ void app_main(void)
     wifi_init_sta();
 
     // Tarea del servidor UDP
-    xTaskCreate(udp_server_task, "udp_server_task", 4096, NULL, 5, NULL);
+    xTaskCreate(udp_server_task, "udp_server_task", 4096, NULL, 5, &udp_server_task_handle);
 }
 
 
@@ -105,7 +114,7 @@ static void configure_Led_Strip(void)
 }
 
 // Led Strip Function Sub Task
-static void blinkLedTask(void *param)
+static void blinkLedTask(void *pvParameters)
 {
     while (1) {
         if (keep_blinking) {
@@ -417,11 +426,11 @@ static void udp_server_task(void *pvParameters)
             break;
         }
         ESP_LOGI(UDP, "Socket bound, port %d", port);
-        color = 2;
-        keep_blinking = true;
-        ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are waiting data.");
 
         while (1) {
+            color = 2;
+            keep_blinking = true;
+            ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are waiting data.");
             ESP_LOGI(UDP, "Waiting for data");
 
             struct sockaddr_in source_addr;
@@ -446,7 +455,7 @@ static void udp_server_task(void *pvParameters)
                 } else {
                     cJSON *test_type = cJSON_GetObjectItem(json, "test-type");
                     if (cJSON_IsString(test_type) && (test_type->valuestring != NULL)) {
-                        execute_test(json);
+                        select_test(json);
                     } else {
                         ESP_LOGW(UDP, "Missing or invalid 'test-type' field");
                     }
@@ -466,7 +475,7 @@ static void udp_server_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-static void execute_test(cJSON *json)
+static void select_test(cJSON *json)
 {
     ESP_LOGI(LIGHT, "Start Blinking Led Strip RGB becasue we are checking the test type");
     color = 3;
@@ -478,17 +487,15 @@ static void execute_test(cJSON *json)
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         cJSON *data = cJSON_GetObjectItem(json, "data");
         if (data && cJSON_IsObject(data)) {  // Verificar que "data" sea un objeto
-                char *data_string = cJSON_PrintUnformatted(data); // Convertir el JSON a string
+                const char *data_string = cJSON_PrintUnformatted(data); // Convertir el JSON a string
                 if (data_string) {
                     ESP_LOGI(TEST, "Data to Encrypt and Hash: %s", data_string);
                     vTaskDelay(2000 / portTICK_PERIOD_MS);
                     ESP_LOGI(TEST, "Executing Encryption and Hashing Test in 3 seconds");
                     vTaskDelay(3000 / portTICK_PERIOD_MS);
 
-                    // Call to Encryption and Hashing Tests
+                    encrypt_hash_tests(data_string);
 
-                    free(data_string);
-                    free(test_type);
                 } else {
                     ESP_LOGE(TEST, "Failed to print JSON data.");
                 }
@@ -498,4 +505,84 @@ static void execute_test(cJSON *json)
     } else {
         ESP_LOGW(TEST, "Unknow type of test");
     }
+}
+
+// Log crypt test info function
+static void log_test_info(int iteration, unsigned char *crypt_data, int key_size)
+{
+    if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration == 1) {
+        // Imprimir el resultado en formato hexadecimal usando ESP_LOGI
+        char hex_output[3 * BLOCK_SIZE + 1];
+        char *ptr = hex_output;
+
+        for (int i = 0; i < BLOCK_SIZE; i++) {
+            ptr += sprintf(ptr, "%02X ", crypt_data[i]);
+        }
+        *ptr = '\0';  // Asegurar que la cadena esté terminada en nulo
+        ESP_LOGI(TEST, "Clave de %d bits: %s", key_size * 8, hex_output);
+    }
+}
+
+// Encrypt and hashing tests executing function
+static void encrypt_hash_tests(const char *data_string)
+{
+    ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we are doing Encryption and Hashing test");
+    keep_blinking = false;
+
+    // Keys of 128, 192 y 256 bits
+    const unsigned char key_128[16] = "1234567890123456";   // 128 bits
+    const unsigned char key_192[24] = "123456789012345678901234";   // 192 bits
+    const unsigned char key_256[32] = "12345678901234567890123456789012";   // 256 bits
+    unsigned char crypt_data[BLOCK_SIZE];
+
+    // Valores de prueba
+    const unsigned char plaintext[BLOCK_SIZE] = "Test Encryption";
+
+    // AES ECB Test
+    ESP_LOGI(TEST, "Executing AES ECB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        AES_ECB_encrypt(key_128, sizeof(key_128), plaintext, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES ECB encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=10000000; i++) {
+        AES_ECB_encrypt(key_192, sizeof(key_192), plaintext, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES ECB encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        AES_ECB_encrypt(key_256, sizeof(key_256), plaintext, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+}
+
+// AES ECB Encryption Function
+static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data) {
+    mbedtls_aes_context aes;
+
+    // Inicializa el contexto de AES
+    mbedtls_aes_init(&aes);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
+
+    // Encripta el bloque en modo ECB
+    mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, plaintext, crypt_data);
+
+    // Liberar recursos
+    mbedtls_aes_free(&aes);
+}
+
+// Padding PKCS#7 Function
+static void apply_pkcs7_padding(unsigned char *input, size_t *input_len, size_t block_size) {
+    
 }

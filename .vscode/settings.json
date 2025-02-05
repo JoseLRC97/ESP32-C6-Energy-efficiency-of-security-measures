@@ -11,6 +11,10 @@
         "freertos.h": "c",
         "task.h": "c",
         "esp_vfs_fat.h": "c",
-        "esp_flash.h": "c"
+        "esp_flash.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "span": "c"
     }
 }
