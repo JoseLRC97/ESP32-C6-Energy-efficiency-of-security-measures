@@ -2,3 +2,4 @@ build/
 sdkconfig
 sdkconfig.old
 .vscode/
+/spiffs_image/wifi_config.txt
