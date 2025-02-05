@@ -1,0 +1,3 @@
+SSID=RouterName
+PASSWORD=RouterPassword
+PORT=1234
