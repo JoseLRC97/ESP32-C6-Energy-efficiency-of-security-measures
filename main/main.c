@@ -16,6 +16,8 @@
 #include "lwip/sys.h"
 #include "cJSON.h"
 #include "mbedtls/aes.h"
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -64,8 +66,9 @@ static void udp_server_task(void *pvParameters);
 static void select_test(cJSON *json);
 static void encrypt_hash_tests(const char *data_string);
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size);
-static void apply_pkcs7_padding(unsigned char *input, size_t *input_len, size_t block_size);
+static void prepare_padded_data(const char *data_string, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
 static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data);
+static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -510,7 +513,7 @@ static void select_test(cJSON *json)
 // Log crypt test info function
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size)
 {
-    if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration % 1000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
     if (iteration == 1) {
         // Imprimir el resultado en formato hexadecimal usando ESP_LOGI
         char hex_output[3 * BLOCK_SIZE + 1];
@@ -534,17 +537,19 @@ static void encrypt_hash_tests(const char *data_string)
     const unsigned char key_128[16] = "1234567890123456";   // 128 bits
     const unsigned char key_192[24] = "123456789012345678901234";   // 192 bits
     const unsigned char key_256[32] = "12345678901234567890123456789012";   // 256 bits
-    unsigned char crypt_data[BLOCK_SIZE];
 
-    // Valores de prueba
-    const unsigned char plaintext[BLOCK_SIZE] = "Test Encryption";
+    unsigned char *crypt_data = NULL;
+    unsigned char *padded_data = NULL;
+    size_t padded_length = 0;
 
-    // AES ECB Test
+    prepare_padded_data(data_string, &padded_data, &crypt_data, &padded_length);
+
+    /* -------------- AES ECB Test -------------- */
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
-        AES_ECB_encrypt(key_128, sizeof(key_128), plaintext, crypt_data);
+        AES_ECB_encrypt(key_128, sizeof(key_128), padded_data, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
 
@@ -552,7 +557,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=10000000; i++) {
-        AES_ECB_encrypt(key_192, sizeof(key_192), plaintext, crypt_data);
+        AES_ECB_encrypt(key_192, sizeof(key_192), padded_data, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
     }
     
@@ -560,8 +565,56 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
-        AES_ECB_encrypt(key_256, sizeof(key_256), plaintext, crypt_data);
+        AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- AES CBC Test -------------- */
+    ESP_LOGI(TEST, "Executing AES CBC encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=10000; i++) {
+        AES_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES CBC encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=10000; i++) {
+        AES_CBC_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES CBC encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=10000; i++) {
+        AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* free(crypt_data);
+    free(padded_data); */
+}
+
+// Function to prepare padded data for encryption
+static void prepare_padded_data(const char *data_string, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length) {
+    // Obtener la longitud de data_string
+    size_t data_length = strlen(data_string);
+    
+    // Calcular el número de bloques y el tamaño del último bloque con padding
+    size_t num_blocks = (data_length + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    *padded_length = num_blocks * BLOCK_SIZE;
+
+    // Asignar memoria para crypt_data y padded_data
+    *crypt_data = (unsigned char*) malloc(*padded_length);
+    *padded_data = (unsigned char*) malloc(*padded_length);
+
+    // Copiar data_string a padded_data y aplicar padding
+    memcpy(*padded_data, data_string, data_length);
+    for(size_t i = data_length; i < *padded_length; i++) {
+        (*padded_data)[i] = (unsigned char)(*padded_length - data_length);
     }
 }
 
@@ -582,7 +635,38 @@ static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const uns
     mbedtls_aes_free(&aes);
 }
 
-// Padding PKCS#7 Function
-static void apply_pkcs7_padding(unsigned char *input, size_t *input_len, size_t block_size) {
-    
+// AES CBC Encryption Function
+static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_aes_context aes;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    unsigned char iv[16];
+
+    // Inicializa el contexto de AES
+    mbedtls_aes_init(&aes);
+
+    // Inicializa el contexto de la función de generación de números aleatorios
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    // Configura la semilla del generador de números aleatorios
+    const char *pers = "aes_generate_iv";
+    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
+
+    // Genera un IV aleatorio
+    mbedtls_ctr_drbg_random(&ctr_drbg, iv, 16);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
+
+    // Copia el IV generado al comienzo del crypt_data
+    memcpy(crypt_data, iv, 16);
+
+    // Encripta el bloque en modo CBC usando el IV
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, iv, plaintext, crypt_data + 16);
+
+    // Liberar recursos
+    mbedtls_aes_free(&aes);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
 }
