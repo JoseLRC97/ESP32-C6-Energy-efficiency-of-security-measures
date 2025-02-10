@@ -16,8 +16,7 @@
 #include "lwip/sys.h"
 #include "cJSON.h"
 #include "mbedtls/aes.h"
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/entropy.h>
+#include <mbedtls/gcm.h>
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -51,7 +50,10 @@ static TaskHandle_t udp_server_task_handle;
 #define BUFFER_SIZE 512
 
 // Values for AES Tests
-#define BLOCK_SIZE 16  // AES Size
+#define BLOCK_SIZE 16
+#define IV_SIZE 16
+#define TWEAK_SIZE 16
+#define TAG_SIZE 16
 
 // Function declarations
 static void configure_Led_Strip();
@@ -71,6 +73,9 @@ static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const uns
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -515,7 +520,7 @@ static void select_test(cJSON *json)
 // Log crypt test info function
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size)
 {
-    if (iteration % 1000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration % 5000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
     if (iteration == 1) {
         // Imprimir el resultado en formato hexadecimal usando ESP_LOGI
         char hex_output[3 * BLOCK_SIZE + 1];
@@ -575,7 +580,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
@@ -583,7 +588,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 192 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
     }
@@ -591,7 +596,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 256 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
     }
@@ -600,7 +605,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
@@ -608,7 +613,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 192 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
     }
@@ -616,7 +621,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 256 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
     }
@@ -625,7 +630,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES OFB encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
@@ -633,7 +638,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES OFB encryption test with 192 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
     }
@@ -641,8 +646,83 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES OBF encryption test with 256 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=10000; i++) {
+    for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- AES CTR Test -------------- */
+    ESP_LOGI(TEST, "Executing AES CTR encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CTR_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES CTR encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CTR_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES CTR encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CTR_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- AES GCM Test -------------- */
+    ESP_LOGI(TEST, "Executing AES GCM encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_GCM_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES GCM encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_GCM_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES GCM encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_GCM_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- AES XTS Test -------------- */
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_XTS_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_XTS_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_XTS_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
@@ -690,23 +770,13 @@ static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const uns
 // AES CBC Encryption Function
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_aes_context aes;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    unsigned char iv[16];
+    unsigned char iv[IV_SIZE];
 
     // Inicializa el contexto de AES
     mbedtls_aes_init(&aes);
 
-    // Inicializa el contexto de la función de generación de números aleatorios
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-
-    // Configura la semilla del generador de números aleatorios
-    const char *pers = "aes_generate_iv";
-    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
-
-    // Genera un IV aleatorio
-    mbedtls_ctr_drbg_random(&ctr_drbg, iv, 16);
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
 
     // Configura la clave según el tamaño especificado
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
@@ -719,30 +789,18 @@ static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const uns
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
 }
 
 // AES CFB Encrypt function
 static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_aes_context aes;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    unsigned char iv[16];
+    unsigned char iv[IV_SIZE];
 
     // Inicializa el contexto de AES
     mbedtls_aes_init(&aes);
 
-    // Inicializa el contexto de la función de generación de números aleatorios
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-
-    // Configura la semilla del generador de números aleatorios
-    const char *pers = "aes_generate_iv";
-    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
-
-    // Genera un IV aleatorio
-    mbedtls_ctr_drbg_random(&ctr_drbg, iv, 16);
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
 
     // Configura la clave según el tamaño especificado
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
@@ -756,30 +814,18 @@ static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const cha
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
 }
 
 // AES OFB Encrypt function
 static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_aes_context aes;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    unsigned char iv[16];
+    unsigned char iv[IV_SIZE];
 
     // Inicializa el contexto de AES
     mbedtls_aes_init(&aes);
 
-    // Inicializa el contexto de la función de generación de números aleatorios
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-
-    // Configura la semilla del generador de números aleatorios
-    const char *pers = "aes_generate_iv";
-    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
-
-    // Genera un IV aleatorio
-    mbedtls_ctr_drbg_random(&ctr_drbg, iv, 16);
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
 
     // Configura la clave según el tamaño especificado
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
@@ -793,6 +839,72 @@ static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const cha
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
+}
+
+// AES CTR Encrypt function
+static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_aes_context aes;
+    unsigned char iv[IV_SIZE];
+
+    // Inicializa el contexto de AES
+    mbedtls_aes_init(&aes);
+
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
+
+    // Copia el IV generado al comienzo del crypt_data
+    memcpy(crypt_data, iv, 16);
+
+    // Encripta el bloque en modo CTR usando el IV
+    size_t nc_off = 0;
+    unsigned char stream_block[16];
+    mbedtls_aes_crypt_ctr(&aes, plaintext_len, &nc_off, iv, stream_block, (const unsigned char *)plaintext, crypt_data + 16);
+
+    // Liberar recursos
+    mbedtls_aes_free(&aes);
+}
+
+// AES GCM Encrypt function
+static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_gcm_context gcm;
+    unsigned char iv[IV_SIZE]; // IV size for GCM is typically 12 bytes
+    unsigned char tag[TAG_SIZE]; // Buffer para almacenar la etiqueta de autenticación
+
+    // Inicializa el contexto de GCM
+    mbedtls_gcm_init(&gcm);
+
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, key_size * 8);
+
+    // Copia el IV generado al comienzo del crypt_data
+    memcpy(crypt_data, iv, 12);
+
+    // Encripta el bloque en modo GCM usando el IV
+    mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, plaintext_len, iv, 12, NULL, 0, (const unsigned char *)plaintext, crypt_data + 12, TAG_SIZE, tag);
+
+    // Liberar recursos
+    mbedtls_gcm_free(&gcm);
+}
+
+// Función para cifrar con AES-XTS
+void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_aes_xts_context aes_xts;
+    unsigned char tweak[TWEAK_SIZE]; // El tweak es como un "IV", pero basado en el número de sector/bloque.
+    esp_fill_random(tweak, TWEAK_SIZE);
+
+    // Inicializar AES-XTS y configurar la clave
+    mbedtls_aes_xts_init(&aes_xts);
+    mbedtls_aes_xts_setkey_enc(&aes_xts, key, key_size * 8);
+
+    // Cifrar en modo XTS
+    mbedtls_aes_crypt_xts(&aes_xts, MBEDTLS_AES_ENCRYPT, plaintext_len, tweak, (const unsigned char *)plaintext, crypt_data);
+
+    // Liberar memoria
+    mbedtls_aes_xts_free(&aes_xts);
 }
