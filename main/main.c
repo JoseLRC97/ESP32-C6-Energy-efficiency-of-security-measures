@@ -729,7 +729,7 @@ static void encrypt_hash_tests(const char *data_string)
     }
 
     /* -------------- AES CCM Test -------------- */
-    ESP_LOGI(TEST, "Executing AES XTS encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing AES CCM encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
@@ -737,7 +737,7 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_128));
     }
 
-    ESP_LOGI(TEST, "Executing AES XTS encryption test with 192 key bits");
+    ESP_LOGI(TEST, "Executing AES CCM encryption test with 192 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
@@ -745,7 +745,7 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_192));
     }
     
-    ESP_LOGI(TEST, "Executing AES XTS encryption test with 256 key bits");
+    ESP_LOGI(TEST, "Executing AES CCM encryption test with 256 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
