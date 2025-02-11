@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include "mbedtls/aes.h"
 #include <mbedtls/gcm.h>
+#include "mbedtls/ccm.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -76,6 +77,7 @@ static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const cha
 static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -726,6 +728,31 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
+    /* -------------- AES CCM Test -------------- */
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CCM_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CCM_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+    
+    ESP_LOGI(TEST, "Executing AES XTS encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        AES_CCM_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -907,4 +934,32 @@ void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plai
 
     // Liberar memoria
     mbedtls_aes_xts_free(&aes_xts);
+}
+
+// AES CCM Encrypt function
+static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_ccm_context ccm;
+    unsigned char iv[IV_SIZE];
+    unsigned char tag[TAG_SIZE];
+
+    // Inicializa el contexto de CCM
+    mbedtls_ccm_init(&ccm);
+
+    // Generar IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, IV_SIZE);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_ccm_setkey(&ccm, MBEDTLS_CIPHER_ID_AES, key, key_size * 8);
+
+    // Copia el IV generado al comienzo del crypt_data
+    memcpy(crypt_data, iv, IV_SIZE);
+
+    // Encripta el bloque en modo CCM usando el IV
+    mbedtls_ccm_encrypt_and_tag(&ccm, plaintext_len, iv, IV_SIZE, NULL, 0, (const unsigned char *)plaintext, crypt_data + IV_SIZE, tag, TAG_SIZE);
+
+    // Copia el tag al final del crypt_data
+    memcpy(crypt_data + IV_SIZE + plaintext_len, tag, TAG_SIZE);
+
+    // Liberar recursos
+    mbedtls_ccm_free(&ccm);
 }
