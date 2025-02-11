@@ -18,6 +18,7 @@
 #include "mbedtls/aes.h"
 #include <mbedtls/gcm.h>
 #include "mbedtls/ccm.h"
+#include "mbedtls/des.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -56,6 +57,9 @@ static TaskHandle_t udp_server_task_handle;
 #define TWEAK_SIZE 16
 #define TAG_SIZE 16
 
+// Values for DES Tests
+#define DES_BLOCK_SIZE 8
+
 // Function declarations
 static void configure_Led_Strip();
 static void blinkLedTask(void *pvParameters);
@@ -69,7 +73,7 @@ static void udp_server_task(void *pvParameters);
 static void select_test(cJSON *json);
 static void encrypt_hash_tests(const char *data_string);
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size);
-static void prepare_padded_data(const char *data_string, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
+static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
 static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data);
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
@@ -78,6 +82,7 @@ static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const cha
 static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -542,7 +547,8 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(LIGHT, "Stop Blinking Led Strip RGB becasue we are doing Encryption and Hashing test");
     keep_blinking = false;
 
-    // Keys of 128, 192 y 256 bits
+    // Keys of 64, 128, 192 y 256 bits
+    const unsigned char key_64[8] = "12345678"; // 64 bits
     const unsigned char key_128[16] = "1234567890123456";   // 128 bits
     const unsigned char key_192[24] = "123456789012345678901234";   // 192 bits
     const unsigned char key_256[32] = "12345678901234567890123456789012";   // 256 bits
@@ -551,7 +557,7 @@ static void encrypt_hash_tests(const char *data_string)
     unsigned char *padded_data = NULL;
     size_t padded_length = 0;
 
-    prepare_padded_data(data_string, &padded_data, &crypt_data, &padded_length);
+    prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for AES
 
     /* -------------- AES ECB Test -------------- */
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 128 key bits");
@@ -753,18 +759,29 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
+    prepare_padded_data(data_string, DES_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for DES
+
+    /* -------------- DES ECB Test -------------- */
+    ESP_LOGI(TEST, "Executing DES ECB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        DES_ECB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_64));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
 
-// Function to prepare padded data for encryption
-static void prepare_padded_data(const char *data_string, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length) {
+// Function to prepare padded data for encryption with custom block size
+static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length) {
     // Obtener la longitud de data_string
     size_t data_length = strlen(data_string);
     
     // Calcular el número de bloques y el tamaño del último bloque con padding
-    size_t num_blocks = (data_length + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    *padded_length = num_blocks * BLOCK_SIZE;
+    size_t num_blocks = (data_length + block_size - 1) / block_size;
+    *padded_length = num_blocks * block_size;
 
     // Asignar memoria para crypt_data y padded_data
     *crypt_data = (unsigned char*) malloc(*padded_length);
@@ -772,7 +789,7 @@ static void prepare_padded_data(const char *data_string, unsigned char **padded_
 
     // Copiar data_string a padded_data y aplicar padding
     memcpy(*padded_data, data_string, data_length);
-    for(size_t i = data_length; i < *padded_length; i++) {
+    for (size_t i = data_length; i < *padded_length; i++) {
         (*padded_data)[i] = (unsigned char)(*padded_length - data_length);
     }
 }
@@ -962,4 +979,35 @@ static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const cha
 
     // Liberar recursos
     mbedtls_ccm_free(&ccm);
+}
+
+static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des_context des;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de DES
+    mbedtls_des_init(&des);
+
+    // Configura la clave
+    mbedtls_des_setkey_enc(&des, key);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el bloque
+        mbedtls_des_crypt_ecb(&des, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des_free(&des);
 }
