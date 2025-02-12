@@ -400,7 +400,8 @@ static void read_config_files(void) {
 
     while ((read = custom_getline(&line, &len, f)) != -1) {
         line_number++;
-        if (sscanf(line, "SSID=%31s", ssid) == 1) {
+        if (strncmp(line, "SSID=", 5) == 0) {
+            sscanf(line + 5, "%[^\n]", ssid);
             ESP_LOGI(SPIFF, "Line %d: SSID: %s", line_number, ssid);
         } else if (sscanf(line, "PASSWORD=%63s", password) == 1) {
             ESP_LOGI(SPIFF, "Line %d: PASSWORD: %s", line_number, password);
@@ -1011,3 +1012,4 @@ static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, siz
     // Liberar recursos
     mbedtls_des_free(&des);
 }
+
