@@ -82,7 +82,11 @@ static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const cha
 static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
-static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -528,7 +532,7 @@ static void select_test(cJSON *json)
 // Log crypt test info function
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size)
 {
-    if (iteration % 5000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
     if (iteration == 1) {
         // Imprimir el resultado en formato hexadecimal usando ESP_LOGI
         char hex_output[3 * BLOCK_SIZE + 1];
@@ -767,7 +771,43 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
-        DES_ECB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
+        DES_ECB_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_64));
+    }
+
+    /* -------------- DES CBC Test -------------- */
+    ESP_LOGI(TEST, "Executing DES CBC encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        DES_CBC_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_64));
+    }
+
+    /* -------------- DES CFB Test -------------- */
+    ESP_LOGI(TEST, "Executing DES CFB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        DES_CFB_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_64));
+    }
+
+    /* -------------- DES OFB Test -------------- */
+    ESP_LOGI(TEST, "Executing DES OFB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        DES_OFB_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_64));
+    }
+
+    /* -------------- DES CTR Test -------------- */
+    ESP_LOGI(TEST, "Executing DES CTR encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        DES_CTR_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_64));
     }
 
@@ -982,7 +1022,7 @@ static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_ccm_free(&ccm);
 }
 
-static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+static void DES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des_context des;
     unsigned char input[DES_BLOCK_SIZE];
     unsigned char output[DES_BLOCK_SIZE];
@@ -996,6 +1036,7 @@ static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, siz
 
     // Encripta el texto plano en bloques de DES_BLOCK_SIZE
     while (offset < plaintext_len) {
+
         // Copiar el bloque de datos
         memset(input, 0, DES_BLOCK_SIZE);
         size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
@@ -1013,3 +1054,163 @@ static void DES_ECB_encrypt(const unsigned char *key, const char *plaintext, siz
     mbedtls_des_free(&des);
 }
 
+// DES CBC Encrypt function
+static void DES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des_context des;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    unsigned char iv[DES_BLOCK_SIZE];
+    size_t offset = 0;
+    
+    // Inicializa el contexto de DES y configura la clave
+    mbedtls_des_init(&des);
+    mbedtls_des_setkey_enc(&des, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // XOR con el IV (primer bloque) o con el bloque cifrado anterior (siguientes bloques)
+        for (size_t i = 0; i < DES_BLOCK_SIZE; i++) {
+            input[i] ^= iv[i];
+        }
+
+        // Encriptar el bloque
+        mbedtls_des_crypt_ecb(&des, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+
+        // Actualizar el IV para el siguiente bloque
+        memcpy(iv, output, DES_BLOCK_SIZE);
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des_free(&des);
+}
+
+// DES CFB Encrypt function
+static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des_context des;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    unsigned char iv[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de DES y configura la clave
+    mbedtls_des_init(&des);
+    mbedtls_des_setkey_enc(&des, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el IV
+        mbedtls_des_crypt_ecb(&des, iv, output);
+
+        // XOR con el bloque de texto plano
+        for (size_t i = 0; i < DES_BLOCK_SIZE; i++) {
+            crypt_data[offset + i] = input[i] ^ output[i];
+        }
+
+        // Actualizar el IV para el siguiente bloque
+        memcpy(iv, crypt_data + offset, DES_BLOCK_SIZE);
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des_free(&des);
+}
+
+// DES OFB Encrypt function
+static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des_context des;
+    unsigned char iv[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de DES y configura la clave
+    mbedtls_des_init(&des);
+    mbedtls_des_setkey_enc(&des, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Encriptar el IV
+        mbedtls_des_crypt_ecb(&des, iv, output);
+
+        // XOR con el bloque de texto plano
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        for (size_t i = 0; i < block_size; i++) {
+            crypt_data[offset + i] = plaintext[offset + i] ^ output[i];
+        }
+
+        // Actualizar el IV para el siguiente bloque (pero no el texto cifrado)
+        memcpy(iv, output, DES_BLOCK_SIZE);
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des_free(&des);
+}
+
+// DES CTR Encrypt function
+static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des_context des;
+    unsigned char iv[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    unsigned char counter[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de DES y configura la clave
+    mbedtls_des_init(&des);
+    mbedtls_des_setkey_enc(&des, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+    memcpy(counter, iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Encriptar el contador
+        mbedtls_des_crypt_ecb(&des, counter, output);
+
+        // XOR con el bloque de texto plano
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        for (size_t i = 0; i < block_size; i++) {
+            crypt_data[offset + i] = plaintext[offset + i] ^ output[i];
+        }
+
+        // Incrementar el contador para el siguiente bloque
+        for (int i = DES_BLOCK_SIZE - 1; i >= 0; i--) {
+            if (++counter[i]) break;
+        }
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des_free(&des);
+}
