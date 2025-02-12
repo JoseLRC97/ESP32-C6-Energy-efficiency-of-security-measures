@@ -767,7 +767,7 @@ static void encrypt_hash_tests(const char *data_string)
     prepare_padded_data(data_string, DES_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for DES
 
     /* -------------- DES ECB Test -------------- */
-    ESP_LOGI(TEST, "Executing DES ECB encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing DES ECB encryption test with 64 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
@@ -776,7 +776,7 @@ static void encrypt_hash_tests(const char *data_string)
     }
 
     /* -------------- DES CBC Test -------------- */
-    ESP_LOGI(TEST, "Executing DES CBC encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing DES CBC encryption test with 64 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
@@ -785,7 +785,7 @@ static void encrypt_hash_tests(const char *data_string)
     }
 
     /* -------------- DES CFB Test -------------- */
-    ESP_LOGI(TEST, "Executing DES CFB encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing DES CFB encryption test with 64 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
@@ -794,7 +794,7 @@ static void encrypt_hash_tests(const char *data_string)
     }
 
     /* -------------- DES OFB Test -------------- */
-    ESP_LOGI(TEST, "Executing DES OFB encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing DES OFB encryption test with 64 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
@@ -803,7 +803,7 @@ static void encrypt_hash_tests(const char *data_string)
     }
 
     /* -------------- DES CTR Test -------------- */
-    ESP_LOGI(TEST, "Executing DES CTR encryption test with 128 key bits");
+    ESP_LOGI(TEST, "Executing DES CTR encryption test with 64 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
