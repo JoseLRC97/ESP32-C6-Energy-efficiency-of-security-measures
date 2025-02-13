@@ -19,6 +19,7 @@
 #include <mbedtls/gcm.h>
 #include "mbedtls/ccm.h"
 #include "mbedtls/des.h"
+#include "mbedtls/chacha20.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -60,6 +61,9 @@ static TaskHandle_t udp_server_task_handle;
 // Values for DES Tests
 #define DES_BLOCK_SIZE 8
 
+// Values for ChaCha20
+#define NONCE_SIZE 12
+
 // Function declarations
 static void configure_Led_Strip();
 static void blinkLedTask(void *pvParameters);
@@ -84,12 +88,13 @@ static void AES_XTS_encrypt(const unsigned char *key, size_t key_size, const cha
 static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void DES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void DES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
-static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
-static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
-static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_CFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void DES_CTR_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void TDES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
-static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void TDES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void ChaCha20_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -792,7 +797,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
-        DES_CFB_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        DES_CFB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_64));
     }
 
@@ -801,7 +806,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
-        DES_OFB_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        DES_OFB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_64));
     }
 
@@ -810,7 +815,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
-        DES_CTR_encrypt(key_64, padded_data, sizeof(padded_data), crypt_data);
+        DES_CTR_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_64));
     }
 
@@ -853,7 +858,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
-        TDES_OFB_encrypt(key_128, padded_data, sizeof(padded_data), crypt_data);
+        TDES_OFB_encrypt(key_128, data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
 
@@ -861,8 +866,17 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
-        TDES_OFB_encrypt(key_192, padded_data, sizeof(padded_data), crypt_data);
+        TDES_OFB_encrypt(key_192, data_string, sizeof(data_string), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    /* -------------- ChaCha20 Test -------------- */
+    ESP_LOGI(TEST, "Executing ChaCha20 encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        ChaCha20_encrypt(key_256, data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
     }
 
     /* free(crypt_data);
@@ -1154,7 +1168,7 @@ static void DES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, 
 }
 
 // DES CFB Encrypt function
-static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+static void DES_CFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des_context des;
     unsigned char input[DES_BLOCK_SIZE];
     unsigned char output[DES_BLOCK_SIZE];
@@ -1195,7 +1209,7 @@ static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, 
 }
 
 // DES OFB Encrypt function
-static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+static void DES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des_context des;
     unsigned char iv[DES_BLOCK_SIZE];
     unsigned char output[DES_BLOCK_SIZE];
@@ -1231,7 +1245,7 @@ static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, 
 }
 
 // DES CTR Encrypt function
-static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+static void DES_CTR_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des_context des;
     unsigned char iv[DES_BLOCK_SIZE];
     unsigned char output[DES_BLOCK_SIZE];
@@ -1295,7 +1309,7 @@ static void TDES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext,
         mbedtls_des3_crypt_ecb(&des3, input, output);
 
         // Copiar el bloque cifrado a crypt_data
-        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+        memcpy(crypt_data + offset, output, block_size);
         offset += DES_BLOCK_SIZE;
     }
 
@@ -1335,7 +1349,7 @@ static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext,
         mbedtls_des3_crypt_ecb(&des3, input, output);
 
         // Copiar el bloque cifrado a crypt_data
-        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+        memcpy(crypt_data + offset, output, block_size);
 
         // Actualizar el IV para el siguiente bloque
         memcpy(iv, output, DES_BLOCK_SIZE);
@@ -1348,7 +1362,7 @@ static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext,
 }
 
 // 3DES OFB Encrypt function
-static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+static void TDES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des3_context des3;
     unsigned char input[DES_BLOCK_SIZE];
     unsigned char output[DES_BLOCK_SIZE];
@@ -1383,7 +1397,7 @@ static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext,
         }
 
         // Copiar el bloque cifrado a crypt_data
-        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+        memcpy(crypt_data + offset, output, block_size);
 
         // Actualizar el IV para el siguiente bloque
         memcpy(ofb_iv, output, DES_BLOCK_SIZE);
@@ -1395,3 +1409,23 @@ static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext,
     mbedtls_des3_free(&des3);
 }
 
+// ChaCha20 Encrypt function
+static void ChaCha20_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_chacha20_context chacha20;
+    unsigned char nonce[NONCE_SIZE];  // ChaCha20 utiliza un nonce de 12 bytes
+
+     // Inicializa el contexto de ChaCha20 y configura la clave
+     mbedtls_chacha20_init(&chacha20);
+     mbedtls_chacha20_setkey(&chacha20, key);
+
+    esp_fill_random(nonce, NONCE_SIZE); // Generación aleatoria del nonce
+
+    // Configura el contexto de ChaCha20 con la clave y el nonce
+    mbedtls_chacha20_starts(&chacha20, nonce, 0);
+
+    // Encripta el texto plano en un solo paso
+    mbedtls_chacha20_update(&chacha20, plaintext_len, (const unsigned char*)plaintext, crypt_data);
+
+    // Liberar recursos
+    mbedtls_chacha20_free(&chacha20);
+}
