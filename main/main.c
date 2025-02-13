@@ -87,6 +87,9 @@ static void DES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, 
 static void DES_CFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void DES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void TDES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -811,6 +814,57 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_64));
     }
 
+    /* -------------- 3DES ECB Test -------------- */
+    ESP_LOGI(TEST, "Executing 3DES ECB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_ECB_encrypt(key_128, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing 3DES ECB encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_ECB_encrypt(key_192, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    /* -------------- 3DES CBC Test -------------- */
+    ESP_LOGI(TEST, "Executing 3DES CBC encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_CBC_encrypt(key_128, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing 3DES CBC encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_CBC_encrypt(key_192, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    /* -------------- 3DES OFB Test -------------- */
+    ESP_LOGI(TEST, "Executing 3DES OFB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_OFB_encrypt(key_128, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing 3DES OFB encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        TDES_OFB_encrypt(key_192, padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -1022,6 +1076,7 @@ static void AES_CCM_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_ccm_free(&ccm);
 }
 
+// DES ECB Encrypt function
 static void DES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_des_context des;
     unsigned char input[DES_BLOCK_SIZE];
@@ -1214,3 +1269,129 @@ static void DES_CTR_encrypt(const unsigned char *key, unsigned char *plaintext, 
     // Liberar recursos
     mbedtls_des_free(&des);
 }
+
+// 3DES ECB Encrypt function
+static void TDES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des3_context des3;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de 3DES
+    mbedtls_des3_init(&des3);
+
+    // Configura la clave para 3DES
+    mbedtls_des3_set3key_enc(&des3, key);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el bloque
+        mbedtls_des3_crypt_ecb(&des3, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des3_free(&des3);
+}
+
+// 3DES CBC Encrypt function
+static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des3_context des3;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    unsigned char iv[DES_BLOCK_SIZE];
+    size_t offset = 0;
+    
+    // Inicializa el contexto de 3DES y configura la clave
+    mbedtls_des3_init(&des3);
+    mbedtls_des3_set3key_enc(&des3, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // XOR con el IV (primer bloque) o con el bloque cifrado anterior (siguientes bloques)
+        for (size_t i = 0; i < DES_BLOCK_SIZE; i++) {
+            input[i] ^= iv[i];
+        }
+
+        // Encriptar el bloque
+        mbedtls_des3_crypt_ecb(&des3, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+
+        // Actualizar el IV para el siguiente bloque
+        memcpy(iv, output, DES_BLOCK_SIZE);
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des3_free(&des3);
+}
+
+// 3DES OFB Encrypt function
+static void TDES_OFB_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_des3_context des3;
+    unsigned char input[DES_BLOCK_SIZE];
+    unsigned char output[DES_BLOCK_SIZE];
+    unsigned char iv[DES_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de 3DES y configura la clave
+    mbedtls_des3_init(&des3);
+    mbedtls_des3_set3key_enc(&des3, key);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, DES_BLOCK_SIZE);
+
+    // Inicializa el vector de inicialización (IV) para OFB
+    unsigned char ofb_iv[DES_BLOCK_SIZE];
+    memcpy(ofb_iv, iv, DES_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de DES_BLOCK_SIZE
+    while (offset < plaintext_len) {
+
+        // Copiar el bloque de datos
+        memset(input, 0, DES_BLOCK_SIZE);
+        size_t block_size = (plaintext_len - offset) > DES_BLOCK_SIZE ? DES_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el IV usando ECB y generar la siguiente parte del keystream
+        mbedtls_des3_crypt_ecb(&des3, ofb_iv, output);
+
+        // XOR el keystream con el texto plano para obtener el texto cifrado
+        for (size_t i = 0; i < block_size; i++) {
+            output[i] ^= input[i];
+        }
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, DES_BLOCK_SIZE);
+
+        // Actualizar el IV para el siguiente bloque
+        memcpy(ofb_iv, output, DES_BLOCK_SIZE);
+
+        offset += DES_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_des3_free(&des3);
+}
+
