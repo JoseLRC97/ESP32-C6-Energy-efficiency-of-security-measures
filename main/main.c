@@ -100,6 +100,7 @@ static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext,
 static void TDES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void ChaCha20_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void Camellia_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void Camellia_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -886,7 +887,7 @@ static void encrypt_hash_tests(const char *data_string)
 
     prepare_padded_data(data_string, CAMELLIA_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for CAMELLIA
 
-    /* -------------- Camellia Test -------------- */
+    /* -------------- Camellia ECB Test -------------- */
     ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
@@ -908,6 +909,31 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_ECB_encrypt(key_256, sizeof(key_256), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- Camellia CBC Test -------------- */
+    ESP_LOGI(TEST, "Executing CAMELLIA CBC encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CBC_encrypt(key_128, sizeof(key_128), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA CBC encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CBC_encrypt(key_192, sizeof(key_192), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA CBC encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CBC_encrypt(key_256, sizeof(key_256), padded_data, sizeof(padded_data), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
@@ -1502,6 +1528,51 @@ static void Camellia_ECB_encrypt(const unsigned char *key, size_t key_size, cons
 
         // Copiar el bloque cifrado a crypt_data
         memcpy(crypt_data + offset, output, CAMELLIA_BLOCK_SIZE);
+        offset += CAMELLIA_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_camellia_free(&camellia);
+}
+
+// Camellia CBC Encrypt function
+static void Camellia_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_camellia_context camellia;
+    unsigned char input[CAMELLIA_BLOCK_SIZE];
+    unsigned char output[CAMELLIA_BLOCK_SIZE];
+    unsigned char iv[CAMELLIA_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de Camellia
+    mbedtls_camellia_init(&camellia);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_camellia_setkey_enc(&camellia, key, key_size * 8);
+
+    // Genera el IV aleatorio usando el generador de hardware TRNG del ESP32-C6
+    esp_fill_random(iv, CAMELLIA_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques de 16 bytes
+    while (offset < plaintext_len) {
+        // Copiar el bloque de datos
+        memset(input, 0, 16);
+        size_t block_size = (plaintext_len - offset) > CAMELLIA_BLOCK_SIZE ? CAMELLIA_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Hacer XOR con el IV actual
+        for (size_t i = 0; i < CAMELLIA_BLOCK_SIZE; ++i) {
+            input[i] ^= iv[i];
+        }
+
+        // Encriptar el bloque
+        mbedtls_camellia_crypt_ecb(&camellia, MBEDTLS_CAMELLIA_ENCRYPT, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, CAMELLIA_BLOCK_SIZE);
+
+        // Actualizar el IV actual con el bloque cifrado
+        memcpy(iv, output, CAMELLIA_BLOCK_SIZE);
+
         offset += CAMELLIA_BLOCK_SIZE;
     }
 
