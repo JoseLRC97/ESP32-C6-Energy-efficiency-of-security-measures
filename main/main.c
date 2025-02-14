@@ -20,6 +20,7 @@
 #include "mbedtls/ccm.h"
 #include "mbedtls/des.h"
 #include "mbedtls/chacha20.h"
+#include <mbedtls/camellia.h>
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -64,6 +65,9 @@ static TaskHandle_t udp_server_task_handle;
 // Values for ChaCha20
 #define NONCE_SIZE 12
 
+// Values for Camellia
+#define CAMELLIA_BLOCK_SIZE 16
+
 // Function declarations
 static void configure_Led_Strip();
 static void blinkLedTask(void *pvParameters);
@@ -78,7 +82,7 @@ static void select_test(cJSON *json);
 static void encrypt_hash_tests(const char *data_string);
 static void log_test_info(int iteration, unsigned char *crypt_data, int key_size);
 static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
-static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data);
+static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
@@ -95,6 +99,7 @@ static void TDES_ECB_encrypt(const unsigned char *key, unsigned char *plaintext,
 static void TDES_CBC_encrypt(const unsigned char *key, unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void TDES_OFB_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void ChaCha20_encrypt(const unsigned char *key, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void Camellia_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -577,7 +582,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
-        AES_ECB_encrypt(key_128, sizeof(key_128), padded_data, crypt_data);
+        AES_ECB_encrypt(key_128, sizeof(key_128), padded_data, sizeof(padded_data), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_128));
     }
 
@@ -585,7 +590,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=10000000; i++) {
-        AES_ECB_encrypt(key_192, sizeof(key_192), padded_data, crypt_data);
+        AES_ECB_encrypt(key_192, sizeof(key_192), padded_data, sizeof(padded_data), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_192));
     }
     
@@ -593,7 +598,7 @@ static void encrypt_hash_tests(const char *data_string)
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
-        AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, crypt_data);
+        AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, sizeof(padded_data), crypt_data);
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
@@ -879,6 +884,33 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
+    prepare_padded_data(data_string, CAMELLIA_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for CAMELLIA
+
+    /* -------------- Camellia Test -------------- */
+    ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_ECB_encrypt(key_128, sizeof(key_128), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_ECB_encrypt(key_192, sizeof(key_192), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_ECB_encrypt(key_256, sizeof(key_256), padded_data, sizeof(padded_data), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -903,9 +935,12 @@ static void prepare_padded_data(const char *data_string, size_t block_size, unsi
     }
 }
 
-// AES ECB Encryption Function
-static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, unsigned char *crypt_data) {
+// AES ECB Encrypt function
+static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
     mbedtls_aes_context aes;
+    unsigned char input[AES_BLOCK_BYTES];
+    unsigned char output[AES_BLOCK_BYTES];
+    size_t offset = 0;
 
     // Inicializa el contexto de AES
     mbedtls_aes_init(&aes);
@@ -913,8 +948,20 @@ static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const uns
     // Configura la clave según el tamaño especificado
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
 
-    // Encripta el bloque en modo ECB
-    mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, plaintext, crypt_data);
+    // Encripta el texto plano en bloques de 16 bytes
+    while (offset < plaintext_len) {
+        // Copiar el bloque de datos
+        memset(input, 0, AES_BLOCK_BYTES);
+        size_t block_size = (plaintext_len - offset) > AES_BLOCK_BYTES ? AES_BLOCK_BYTES : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el bloque
+        mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, AES_BLOCK_BYTES);
+        offset += AES_BLOCK_BYTES;
+    }
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -935,10 +982,10 @@ static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const uns
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
 
     // Copia el IV generado al comienzo del crypt_data
-    memcpy(crypt_data, iv, 16);
+    memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo CBC usando el IV
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, iv, plaintext, crypt_data + 16);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, iv, plaintext, crypt_data + AES_BLOCK_BYTES);
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -959,11 +1006,11 @@ static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
 
     // Copia el IV generado al comienzo del crypt_data
-    memcpy(crypt_data, iv, 16);
+    memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo CFB usando el IV
     size_t iv_offset = 0;
-    mbedtls_aes_crypt_cfb128(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, &iv_offset, iv, (const unsigned char *)plaintext, crypt_data + 16);
+    mbedtls_aes_crypt_cfb128(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, &iv_offset, iv, (const unsigned char *)plaintext, crypt_data + AES_BLOCK_BYTES);
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -984,11 +1031,11 @@ static void AES_OFB_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
 
     // Copia el IV generado al comienzo del crypt_data
-    memcpy(crypt_data, iv, 16);
+    memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo OFB usando el IV
     size_t iv_offset = 0;
-    mbedtls_aes_crypt_ofb(&aes, plaintext_len, &iv_offset, iv, (const unsigned char *)plaintext, crypt_data + 16);
+    mbedtls_aes_crypt_ofb(&aes, plaintext_len, &iv_offset, iv, (const unsigned char *)plaintext, crypt_data + AES_BLOCK_BYTES);
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -1009,12 +1056,12 @@ static void AES_CTR_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_aes_setkey_enc(&aes, key, key_size * 8);
 
     // Copia el IV generado al comienzo del crypt_data
-    memcpy(crypt_data, iv, 16);
+    memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo CTR usando el IV
     size_t nc_off = 0;
     unsigned char stream_block[16];
-    mbedtls_aes_crypt_ctr(&aes, plaintext_len, &nc_off, iv, stream_block, (const unsigned char *)plaintext, crypt_data + 16);
+    mbedtls_aes_crypt_ctr(&aes, plaintext_len, &nc_off, iv, stream_block, (const unsigned char *)plaintext, crypt_data + AES_BLOCK_BYTES);
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -1036,10 +1083,10 @@ static void AES_GCM_encrypt(const unsigned char *key, size_t key_size, const cha
     mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, key_size * 8);
 
     // Copia el IV generado al comienzo del crypt_data
-    memcpy(crypt_data, iv, 12);
+    memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo GCM usando el IV
-    mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, plaintext_len, iv, 12, NULL, 0, (const unsigned char *)plaintext, crypt_data + 12, TAG_SIZE, tag);
+    mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, plaintext_len, iv, IV_SIZE, NULL, 0, (const unsigned char *)plaintext, crypt_data + IV_SIZE, TAG_SIZE, tag);
 
     // Liberar recursos
     mbedtls_gcm_free(&gcm);
@@ -1428,4 +1475,36 @@ static void ChaCha20_encrypt(const unsigned char *key, const char *plaintext, si
 
     // Liberar recursos
     mbedtls_chacha20_free(&chacha20);
+}
+
+// Camellia ECB Encrypt function
+static void Camellia_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_camellia_context camellia;
+    unsigned char input[CAMELLIA_BLOCK_SIZE];
+    unsigned char output[CAMELLIA_BLOCK_SIZE];
+    size_t offset = 0;
+
+    // Inicializa el contexto de Camellia
+    mbedtls_camellia_init(&camellia);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_camellia_setkey_enc(&camellia, key, key_size * 8);
+
+    // Encripta el texto plano en bloques de 16 bytes
+    while (offset < plaintext_len) {
+        // Copiar el bloque de datos
+        memset(input, 0, 16);
+        size_t block_size = (plaintext_len - offset) > CAMELLIA_BLOCK_SIZE ? CAMELLIA_BLOCK_SIZE : (plaintext_len - offset);
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el bloque
+        mbedtls_camellia_crypt_ecb(&camellia, MBEDTLS_CAMELLIA_ENCRYPT, input, output);
+
+        // Copiar el bloque cifrado a crypt_data
+        memcpy(crypt_data + offset, output, CAMELLIA_BLOCK_SIZE);
+        offset += CAMELLIA_BLOCK_SIZE;
+    }
+
+    // Liberar recursos
+    mbedtls_camellia_free(&camellia);
 }
