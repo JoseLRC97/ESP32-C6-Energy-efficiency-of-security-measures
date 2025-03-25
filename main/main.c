@@ -103,6 +103,7 @@ static void Camellia_ECB_encrypt(const unsigned char *key, size_t key_size, cons
 static void Camellia_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void Camellia_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void Camellia_OFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void Camellia_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -989,6 +990,31 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info(i, crypt_data, sizeof(key_256));
     }
 
+    /* -------------- Camellia CTR Test -------------- */
+    ESP_LOGI(TEST, "Executing CAMELLIA CTR encryption test with 128 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CTR_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_128));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA CTR encryption test with 192 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CTR_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_192));
+    }
+
+    ESP_LOGI(TEST, "Executing CAMELLIA CTR encryption test with 256 key bits");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        Camellia_CTR_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
+        log_test_info(i, crypt_data, sizeof(key_256));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -1703,6 +1729,47 @@ static void Camellia_OFB_encrypt(const unsigned char *key, size_t key_size, cons
 
         // Actualizar el IV para el siguiente bloque (en OFB, el IV es reemplazado por el bloque de salida)
         memcpy(iv, output, CAMELLIA_BLOCK_SIZE);
+
+        offset += block_size;
+    }
+
+    // Liberar recursos
+    mbedtls_camellia_free(&camellia);
+}
+
+// Camellia CTR Encrypt function
+static void Camellia_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_camellia_context camellia;
+    unsigned char nonce_counter[CAMELLIA_BLOCK_SIZE]; // Nonce + Counter
+    unsigned char stream_block[CAMELLIA_BLOCK_SIZE]; // Bloque de cifrado
+    size_t offset = 0;
+
+    // Inicializa el contexto de Camellia
+    mbedtls_camellia_init(&camellia);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_camellia_setkey_enc(&camellia, key, key_size * 8);
+
+    // Generar un nonce aleatorio (parte inicial del nonce + counter)
+    esp_fill_random(nonce_counter, CAMELLIA_BLOCK_SIZE);
+
+    // Encripta el texto plano en bloques
+    while (offset < plaintext_len) {
+        // Cifra el nonce_counter para generar el bloque de flujo (stream block)
+        mbedtls_camellia_crypt_ecb(&camellia, MBEDTLS_CAMELLIA_ENCRYPT, nonce_counter, stream_block);
+
+        // Hacer XOR entre el bloque de flujo y el texto plano
+        size_t block_size = (plaintext_len - offset) > CAMELLIA_BLOCK_SIZE ? CAMELLIA_BLOCK_SIZE : (plaintext_len - offset);
+        for (size_t i = 0; i < block_size; ++i) {
+            crypt_data[offset + i] = plaintext[offset + i] ^ stream_block[i];
+        }
+
+        // Incrementar el contador (últimos bytes del nonce_counter)
+        for (int i = CAMELLIA_BLOCK_SIZE - 1; i >= 0; --i) {
+            if (++nonce_counter[i]) {
+                break;
+            }
+        }
 
         offset += block_size;
     }
