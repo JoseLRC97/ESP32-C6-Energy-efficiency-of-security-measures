@@ -23,6 +23,7 @@
 #include <mbedtls/camellia.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/sha512.h>
+#include <mbedtls/md5.h>
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -111,6 +112,7 @@ void hash_sha224(const char *input, unsigned char *output);
 void hash_sha256(const char *input, unsigned char *output);
 void hash_sha384(const char *input, unsigned char *output);
 void hash_sha512(const char *input, unsigned char *output);
+void hash_md5(const char *input, unsigned char *output);
 
 // Main Function
 void app_main(void)
@@ -1056,6 +1058,15 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_hash(i, hash_output, 64);
     }
 
+    /* -------------- MD5 HASH TEST -------------- */
+    ESP_LOGI(TEST, "Executing MD5 Hash Test");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        hash_md5(data_string, hash_output);
+        log_test_info_hash(i, hash_output, 16);
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -1871,4 +1882,22 @@ void log_test_info_hash(int iteration, const unsigned char *hash, size_t len) {
         // Usar ESP_LOGI para imprimir el hash
         ESP_LOGI(TEST, "Hash: %s", hash_string);
     }
+}
+
+// Función para calcular el hash MD5
+void hash_md5(const char *input, unsigned char *output) {
+    mbedtls_md5_context ctx;
+    mbedtls_md5_init(&ctx);
+
+    // Inicia el contexto de MD5
+    mbedtls_md5_starts(&ctx);
+
+    // Procesa el string a hashear
+    mbedtls_md5_update(&ctx, (const unsigned char *)input, strlen(input));
+
+    // Finaliza el hashing y almacena el resultado en output
+    mbedtls_md5_finish(&ctx, output);
+
+    // Libera la memoria del contexto
+    mbedtls_md5_free(&ctx);
 }
