@@ -21,6 +21,8 @@
 #include "mbedtls/des.h"
 #include "mbedtls/chacha20.h"
 #include <mbedtls/camellia.h>
+#include <mbedtls/sha256.h>
+#include <mbedtls/sha512.h>
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -80,7 +82,7 @@ static void read_config_files();
 static void udp_server_task(void *pvParameters);
 static void select_test(cJSON *json);
 static void encrypt_hash_tests(const char *data_string);
-static void log_test_info(int iteration, unsigned char *crypt_data, int key_size);
+static void log_test_info_crypt(int iteration, unsigned char *crypt_data, int key_size);
 static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
 static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
@@ -104,6 +106,11 @@ static void Camellia_CBC_encrypt(const unsigned char *key, size_t key_size, cons
 static void Camellia_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void Camellia_OFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void Camellia_CTR_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+void log_test_info_hash(int iteration, const unsigned char *hash, size_t len);
+void hash_sha224(const char *input, unsigned char *output);
+void hash_sha256(const char *input, unsigned char *output);
+void hash_sha384(const char *input, unsigned char *output);
+void hash_sha512(const char *input, unsigned char *output);
 
 // Main Function
 void app_main(void)
@@ -547,7 +554,7 @@ static void select_test(cJSON *json)
 }
 
 // Log crypt test info function
-static void log_test_info(int iteration, unsigned char *crypt_data, int key_size)
+static void log_test_info_crypt(int iteration, unsigned char *crypt_data, int key_size)
 {
     if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
     if (iteration == 1) {
@@ -578,6 +585,7 @@ static void encrypt_hash_tests(const char *data_string)
     unsigned char *crypt_data = NULL;
     unsigned char *padded_data = NULL;
     size_t padded_length = 0;
+    unsigned char hash_output[64]; // SHA-512 produce hasta 64 bytes
 
     prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for AES
 
@@ -587,7 +595,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
         AES_ECB_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 192 key bits");
@@ -595,7 +603,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=10000000; i++) {
         AES_ECB_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 256 key bits");
@@ -603,7 +611,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
         AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES CBC Test -------------- */
@@ -612,7 +620,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 192 key bits");
@@ -620,7 +628,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 256 key bits");
@@ -628,7 +636,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES CFB Test -------------- */
@@ -637,7 +645,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 192 key bits");
@@ -645,7 +653,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 256 key bits");
@@ -653,7 +661,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES OFB Test -------------- */
@@ -662,7 +670,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES OFB encryption test with 192 key bits");
@@ -670,7 +678,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES OFB encryption test with 256 key bits");
@@ -678,7 +686,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_OFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES CTR Test -------------- */
@@ -687,7 +695,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CTR_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES CTR encryption test with 192 key bits");
@@ -695,7 +703,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CTR_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES CTR encryption test with 256 key bits");
@@ -703,7 +711,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CTR_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES GCM Test -------------- */
@@ -712,7 +720,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_GCM_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES GCM encryption test with 192 key bits");
@@ -720,7 +728,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_GCM_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES GCM encryption test with 256 key bits");
@@ -728,7 +736,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_GCM_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES XTS Test -------------- */
@@ -737,7 +745,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_XTS_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES XTS encryption test with 192 key bits");
@@ -745,7 +753,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_XTS_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES XTS encryption test with 256 key bits");
@@ -753,7 +761,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_XTS_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- AES CCM Test -------------- */
@@ -762,7 +770,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CCM_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing AES CCM encryption test with 192 key bits");
@@ -770,7 +778,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CCM_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
     
     ESP_LOGI(TEST, "Executing AES CCM encryption test with 256 key bits");
@@ -778,7 +786,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         AES_CCM_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     prepare_padded_data(data_string, DES_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for DES
@@ -789,7 +797,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=1000000; i++) {
         DES_ECB_encrypt(key_64, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_64));
+        log_test_info_crypt(i, crypt_data, sizeof(key_64));
     }
 
     /* -------------- DES CBC Test -------------- */
@@ -798,7 +806,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         DES_CBC_encrypt(key_64, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_64));
+        log_test_info_crypt(i, crypt_data, sizeof(key_64));
     }
 
     /* -------------- DES CFB Test -------------- */
@@ -807,7 +815,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         DES_CFB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_64));
+        log_test_info_crypt(i, crypt_data, sizeof(key_64));
     }
 
     /* -------------- DES OFB Test -------------- */
@@ -816,7 +824,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         DES_OFB_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_64));
+        log_test_info_crypt(i, crypt_data, sizeof(key_64));
     }
 
     /* -------------- DES CTR Test -------------- */
@@ -825,7 +833,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         DES_CTR_encrypt(key_64, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_64));
+        log_test_info_crypt(i, crypt_data, sizeof(key_64));
     }
 
     /* -------------- 3DES ECB Test -------------- */
@@ -834,7 +842,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_ECB_encrypt(key_128, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing 3DES ECB encryption test with 192 key bits");
@@ -842,7 +850,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_ECB_encrypt(key_192, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     /* -------------- 3DES CBC Test -------------- */
@@ -851,7 +859,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_CBC_encrypt(key_128, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing 3DES CBC encryption test with 192 key bits");
@@ -859,7 +867,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_CBC_encrypt(key_192, padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     /* -------------- 3DES OFB Test -------------- */
@@ -868,7 +876,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_OFB_encrypt(key_128, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing 3DES OFB encryption test with 192 key bits");
@@ -876,7 +884,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         TDES_OFB_encrypt(key_192, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     /* -------------- ChaCha20 Test -------------- */
@@ -885,7 +893,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         ChaCha20_encrypt(key_256, data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     prepare_padded_data(data_string, CAMELLIA_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for CAMELLIA
@@ -896,7 +904,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_ECB_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 192 key bits");
@@ -904,7 +912,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_ECB_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 256 key bits");
@@ -912,7 +920,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_ECB_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- Camellia CBC Test -------------- */
@@ -921,7 +929,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CBC encryption test with 192 key bits");
@@ -929,7 +937,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CBC_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CBC encryption test with 256 key bits");
@@ -937,7 +945,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- Camellia CFB Test -------------- */
@@ -946,7 +954,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CFB encryption test with 192 key bits");
@@ -954,7 +962,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CFB encryption test with 256 key bits");
@@ -962,7 +970,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- Camellia OFB Test -------------- */
@@ -971,7 +979,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_OFB_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA OFB encryption test with 192 key bits");
@@ -979,7 +987,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_OFB_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA OFB encryption test with 256 key bits");
@@ -987,7 +995,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_OFB_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
     /* -------------- Camellia CTR Test -------------- */
@@ -996,7 +1004,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CTR_encrypt(key_128, sizeof(key_128), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_128));
+        log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CTR encryption test with 192 key bits");
@@ -1004,7 +1012,7 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CTR_encrypt(key_192, sizeof(key_192), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_192));
+        log_test_info_crypt(i, crypt_data, sizeof(key_192));
     }
 
     ESP_LOGI(TEST, "Executing CAMELLIA CTR encryption test with 256 key bits");
@@ -1012,7 +1020,40 @@ static void encrypt_hash_tests(const char *data_string)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     for(int i=1; i<=100000; i++) {
         Camellia_CTR_encrypt(key_256, sizeof(key_256), data_string, sizeof(data_string), crypt_data);
-        log_test_info(i, crypt_data, sizeof(key_256));
+        log_test_info_crypt(i, crypt_data, sizeof(key_256));
+    }
+
+    /* -------------- SHA HASH TEST -------------- */
+    ESP_LOGI(TEST, "Executing SHA-224 Hash Test");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        hash_sha224(data_string, hash_output);
+        log_test_info_hash(i, hash_output, 28);
+    }
+
+    ESP_LOGI(TEST, "Executing SHA-256 Hash Test");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        hash_sha256(data_string, hash_output);
+        log_test_info_hash(i, hash_output, 32);
+    }
+
+    ESP_LOGI(TEST, "Executing SHA-384 Hash Test");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        hash_sha384(data_string, hash_output);
+        log_test_info_hash(i, hash_output, 48);
+    }
+
+    ESP_LOGI(TEST, "Executing SHA-512 Hash Test");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        hash_sha512(data_string, hash_output);
+        log_test_info_hash(i, hash_output, 64);
     }
 
     /* free(crypt_data);
@@ -1776,4 +1817,58 @@ static void Camellia_CTR_encrypt(const unsigned char *key, size_t key_size, cons
 
     // Liberar recursos
     mbedtls_camellia_free(&camellia);
+}
+
+// SHA-224
+void hash_sha224(const char *input, unsigned char *output) {
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 1); // 1 indica SHA-224
+    mbedtls_sha256_update(&ctx, (const unsigned char *)input, strlen(input));
+    mbedtls_sha256_finish(&ctx, output);
+    mbedtls_sha256_free(&ctx);
+}
+
+// SHA-256
+void hash_sha256(const char *input, unsigned char *output) {
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0); // 0 indica SHA-256
+    mbedtls_sha256_update(&ctx, (const unsigned char *)input, strlen(input));
+    mbedtls_sha256_finish(&ctx, output);
+    mbedtls_sha256_free(&ctx);
+}
+
+// SHA-384
+void hash_sha384(const char *input, unsigned char *output) {
+    mbedtls_sha512_context ctx;
+    mbedtls_sha512_init(&ctx);
+    mbedtls_sha512_starts(&ctx, 1); // 1 indica SHA-384
+    mbedtls_sha512_update(&ctx, (const unsigned char *)input, strlen(input));
+    mbedtls_sha512_finish(&ctx, output);
+    mbedtls_sha512_free(&ctx);
+}
+
+// SHA-512
+void hash_sha512(const char *input, unsigned char *output) {
+    mbedtls_sha512_context ctx;
+    mbedtls_sha512_init(&ctx);
+    mbedtls_sha512_starts(&ctx, 0); // 0 indica SHA-512
+    mbedtls_sha512_update(&ctx, (const unsigned char *)input, strlen(input));
+    mbedtls_sha512_finish(&ctx, output);
+    mbedtls_sha512_free(&ctx);
+}
+
+void log_test_info_hash(int iteration, const unsigned char *hash, size_t len) {
+    if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration == 1) {
+        char hash_string[len * 2 + 1]; // Buffer para almacenar el hash en formato hexadecimal
+        for (size_t i = 0; i < len; i++) {
+            sprintf(&hash_string[i * 2], "%02x", hash[i]);
+        }
+        hash_string[len * 2] = '\0'; // Asegurar que el string está terminado en nulo
+
+        // Usar ESP_LOGI para imprimir el hash
+        ESP_LOGI(TEST, "Hash: %s", hash_string);
+    }
 }
