@@ -24,6 +24,9 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/sha512.h>
 #include <mbedtls/md5.h>
+#include "mbedtls/pk.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/entropy.h"
 
 // Tags for logs
 static const char *INFO = "Info";
@@ -33,6 +36,7 @@ static const char *WIFI = "Wifi";
 static const char *SPIFF = "Spiff";
 static const char *UDP = "Server UDP";
 static const char *TEST = "Test";
+static const char *KEY = "Key";
 
 // Values for GPIO Led Strip RGB
 #define BLINK_GPIO GPIO_NUM_8
@@ -70,6 +74,12 @@ static TaskHandle_t udp_server_task_handle;
 
 // Values for Camellia
 #define CAMELLIA_BLOCK_SIZE 16
+
+// Variables globales para almacenar las claves en tiempo de ejecución
+unsigned char private_key_2048[2048];
+unsigned char public_key_2048[2048];
+unsigned char private_key_4096[4096];
+unsigned char public_key_4096[4096];
 
 // Function declarations
 static void configure_Led_Strip();
@@ -113,6 +123,8 @@ void hash_sha256(const char *input, unsigned char *output);
 void hash_sha384(const char *input, unsigned char *output);
 void hash_sha512(const char *input, unsigned char *output);
 void hash_md5(const char *input, unsigned char *output);
+static void generate_rsa_keypair(unsigned char *private_key, size_t private_key_size, unsigned char *public_key, size_t public_key_size, int key_size);
+static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 
 // Main Function
 void app_main(void)
@@ -1067,6 +1079,32 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_hash(i, hash_output, 16);
     }
 
+    /* -------------- RSA Encryption TEST -------------- */
+    ESP_LOGI(TEST, "Generando clave RSA de 2048 bits...");
+    generate_rsa_keypair(private_key_2048, sizeof(private_key_2048), public_key_2048, sizeof(public_key_2048), 2048);
+    ESP_LOGI(TEST, "Generando clave RSA de 4096 bits...");
+    generate_rsa_keypair(private_key_4096, sizeof(private_key_4096), public_key_4096, sizeof(public_key_4096), 4096);
+    ESP_LOGI(TEST, "\nClave pública de 2048 bits:\n%s", public_key_2048);
+    ESP_LOGI(TEST, "\nClave pública de 4096 bits:\n%s", public_key_4096);
+    ESP_LOGI(TEST, "\nClave privada de 2048 bits:\n%s", private_key_2048);
+    ESP_LOGI(TEST, "\nClave privada de 4096 bits:\n%s", private_key_4096);
+
+    ESP_LOGI(TEST, "Executing RSA Encryption Test with 2048 bits key");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        RSA_encrypt(public_key_2048, strlen((const char *)public_key_2048) + 1, data_string, sizeof(data_string), crypt_data);
+        log_test_info_crypt(i, crypt_data, sizeof(public_key_2048));
+    }
+
+    ESP_LOGI(TEST, "Executing RSA Encryption Test with 4096 bits key");
+    // Call to measurement sensor
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=100000; i++) {
+        RSA_encrypt(public_key_4096, strlen((const char *)public_key_4096) + 1, data_string, sizeof(data_string), crypt_data);
+        log_test_info_crypt(i, crypt_data, sizeof(public_key_4096));
+    }
+
     /* free(crypt_data);
     free(padded_data); */
 }
@@ -1900,4 +1938,133 @@ void hash_md5(const char *input, unsigned char *output) {
 
     // Libera la memoria del contexto
     mbedtls_md5_free(&ctx);
+}
+
+// Función genérica para generar claves RSA
+static void generate_rsa_keypair(unsigned char *private_key, size_t private_key_size, unsigned char *public_key, size_t public_key_size, int key_size) {
+    mbedtls_pk_context key;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_entropy_context entropy;
+    const char *pers = "rsa_gen";
+
+    // Inicializa contextos
+    mbedtls_pk_init(&key);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_entropy_init(&entropy);
+
+    // Configura el generador de números aleatorios
+    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
+    if (ret != 0) {
+        ESP_LOGE(KEY, "Error inicializando el generador aleatorio: %d\n", ret);
+        return;
+    }
+
+    // Configura el contexto para clave RSA
+    ret = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
+    if (ret != 0) {
+        ESP_LOGE(KEY, "Error configurando el contexto de clave: %d\n", ret);
+        return;
+    }
+
+    // Genera la clave RSA con el tamaño especificado
+    ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key), mbedtls_ctr_drbg_random, &ctr_drbg, key_size, 65537);
+        if (ret != 0) {
+        ESP_LOGE(KEY, "Error generando clave RSA (%d bits): %d\n", key_size, ret);
+        return;
+    }
+
+    // Exporta la clave privada en formato PEM
+    memset(private_key, 0, private_key_size);
+    ret = mbedtls_pk_write_key_pem(&key, private_key, private_key_size);
+    if (ret == 0) {
+        ESP_LOGI(KEY, "Clave privada (%d bits) generada correctamente.\n", key_size);
+    } else {
+        ESP_LOGE(KEY, "Error exportando la clave privada (%d bits): %d\n", key_size, ret);
+    }
+
+    // Exporta la clave pública en formato PEM
+    memset(public_key, 0, public_key_size);
+    ret = mbedtls_pk_write_pubkey_pem(&key, public_key, public_key_size);
+    if (ret == 0) {
+        ESP_LOGI(KEY, "Clave pública (%d bits) generada correctamente.\n", key_size);
+    } else {
+        ESP_LOGE(KEY, "Error exportando la clave pública (%d bits): %d\n", key_size, ret);
+    }
+
+    // Libera recursos
+    mbedtls_pk_free(&key);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+}
+
+static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data) {
+    mbedtls_pk_context pk;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    const char *pers = "rsa_encrypt";
+    size_t offset = 0;
+    unsigned char input[512];  // Máximo permitido por RSA de 4096 bits con padding
+    unsigned char output[512]; // Ajusta según el tamaño de la clave pública
+    int ret;
+
+    // Inicializa los contextos
+    mbedtls_pk_init(&pk);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_entropy_init(&entropy);
+
+    // Configura el generador de números aleatorios
+    ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, 
+                                (const unsigned char *)pers, strlen(pers));
+    if (ret != 0) {
+        ESP_LOGE(TEST, "Error inicializando el generador aleatorio: %d", ret);
+        return;
+    }
+
+    // Cargar la clave pública proporcionada
+    ret = mbedtls_pk_parse_public_key(&pk, public_key, public_key_len);
+    if (ret != 0) {
+        ESP_LOGE(TEST, "Error cargando la clave pública: %d", ret);
+        return;
+    }
+
+    // Comprueba que la clave cargada es de tipo RSA
+    if (!mbedtls_pk_can_do(&pk, MBEDTLS_PK_RSA)) {
+        ESP_LOGE(TEST, "La clave proporcionada no es una clave RSA.");
+        mbedtls_pk_free(&pk);
+        return;
+    }
+
+    // Obtén el contexto RSA y configura el padding
+    mbedtls_rsa_context *rsa = mbedtls_pk_rsa(pk);
+    size_t rsa_len = mbedtls_rsa_get_len(rsa); // Obtiene el tamaño de la clave en bytes
+    mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, MBEDTLS_MD_SHA256);
+
+    // Encripta el texto plano en bloques
+    while (offset < plaintext_len) {
+        // Copiar el bloque de datos
+        memset(input, 0, rsa_len);  // Asegúrate de que el buffer sea compatible con la longitud de la clave
+        size_t block_size = (plaintext_len - offset) > (rsa_len - 42) 
+                                ? (rsa_len - 42) 
+                                : (plaintext_len - offset); // Tamaño máximo permitido por el padding
+        memcpy(input, plaintext + offset, block_size);
+
+        // Encriptar el bloque
+        ret = mbedtls_rsa_pkcs1_encrypt(rsa, mbedtls_ctr_drbg_random, &ctr_drbg, 
+                                        block_size, input, output);
+        if (ret != 0) {
+            ESP_LOGE(TEST, "Error cifrando el bloque: %d", ret);
+            break;
+        }
+
+        // Copiar el bloque cifrado al buffer de salida
+        memcpy(crypt_data + offset, output, rsa_len);
+        offset += block_size;
+    }
+
+    ESP_LOGI(TEST, "Cifrado RSA completado.");
+
+    // Liberar recursos
+    mbedtls_pk_free(&pk);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
 }
