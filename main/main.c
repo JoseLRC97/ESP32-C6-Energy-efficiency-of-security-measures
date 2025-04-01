@@ -665,14 +665,6 @@ static void encrypt_hash_tests(const char *data_string)
         AES_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
         log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
-
-    ESP_LOGI(TEST, "Executing AES CBC encryption test with 192 key bits");
-    // Call to measurement sensor
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=100000; i++) {
-        AES_CBC_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
-        log_test_info_crypt(i, crypt_data, sizeof(key_192));
-    }
     
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 256 key bits");
     // Call to measurement sensor
@@ -692,16 +684,6 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_decrypt(i, decrypted_data);
     }
 
-    ESP_LOGI(TEST, "Executing AES CBC decryption test with 192 key bits");
-    // Call to measurement sensor
-    AES_CBC_encrypt(key_192, sizeof(key_192), padded_data, IV_SIZE + padded_length, crypt_data);
-    log_test_info_crypt(1, crypt_data, sizeof(key_192));
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=1000000; i++) {
-        AES_CBC_decrypt(key_192, sizeof(key_192), crypt_data, padded_length, decrypted_data, &decrypted_length);
-        log_test_info_decrypt(i, decrypted_data);
-    }
-
     ESP_LOGI(TEST, "Executing AES CBC decryption test with 256 key bits");
     // Call to measurement sensor
     AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
@@ -715,7 +697,7 @@ static void encrypt_hash_tests(const char *data_string)
     /* -------------- AES CBC Test Finished -------------- */
 
     /* -------------- AES CFB Test -------------- */
-    
+
     ESP_LOGI(TEST, "Executing AES CFB encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
