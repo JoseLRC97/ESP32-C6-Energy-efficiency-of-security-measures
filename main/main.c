@@ -94,7 +94,7 @@ static void udp_server_task(void *pvParameters);
 static void select_test(cJSON *json);
 static void encrypt_hash_tests(const char *data_string);
 static void log_test_info_crypt(int iteration, unsigned char *crypt_data, int key_size);
-static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length);
+static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, unsigned char **decrypt_data, size_t *padded_length);
 static void AES_ECB_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const unsigned char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
 static void AES_CFB_encrypt(const unsigned char *key, size_t key_size, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
@@ -125,6 +125,7 @@ void hash_sha512(const char *input, unsigned char *output);
 void hash_md5(const char *input, unsigned char *output);
 static void generate_rsa_keypair(unsigned char *private_key, size_t private_key_size, unsigned char *public_key, size_t public_key_size, int key_size);
 static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, const char *plaintext, size_t plaintext_len, unsigned char *crypt_data);
+static void AES_ECB_decrypt(const unsigned char *key, size_t key_size, const unsigned char *crypt_data, size_t crypt_data_len, unsigned char *plaintext, size_t *plaintext_len);
 
 // Main Function
 void app_main(void)
@@ -584,6 +585,14 @@ static void log_test_info_crypt(int iteration, unsigned char *crypt_data, int ke
     }
 }
 
+static void log_test_info_decrypt(int iteration, unsigned char *decrypt_data)
+{
+    if (iteration % 10000 == 0) ESP_LOGI(TEST, "Iteration: %d", iteration);
+    if (iteration == 1) {
+        ESP_LOGI(TEST, "Texto desencriptado: %s", decrypt_data);
+    }
+}
+
 // Encrypt and hashing tests executing function
 static void encrypt_hash_tests(const char *data_string)
 {
@@ -600,8 +609,10 @@ static void encrypt_hash_tests(const char *data_string)
     unsigned char *padded_data = NULL;
     size_t padded_length = 0;
     unsigned char hash_output[64]; // SHA-512 produce hasta 64 bytes
+    unsigned char *decrypted_data = NULL;
+    size_t decrypted_length = 0;
 
-    prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for AES
+    prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &decrypted_data, &padded_length); // Padded data for AES
 
     /* -------------- AES ECB Test -------------- */
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 128 key bits");
@@ -626,6 +637,36 @@ static void encrypt_hash_tests(const char *data_string)
     for(int i=1; i<=1000000; i++) {
         AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
         log_test_info_crypt(i, crypt_data, sizeof(key_256));
+    }
+
+    ESP_LOGI(TEST, "Executing AES ECB decryption test with 128 key bits");
+    // Call to measurement sensor
+    AES_ECB_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
+    log_test_info_crypt(1, crypt_data, sizeof(key_128));
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        AES_ECB_decrypt(key_128, sizeof(key_128), crypt_data, padded_length, decrypted_data, &decrypted_length);
+        log_test_info_decrypt(i, decrypted_data);
+    }
+
+    ESP_LOGI(TEST, "Executing AES ECB decryption test with 192 key bits");
+    // Call to measurement sensor
+    AES_ECB_encrypt(key_192, sizeof(key_192), padded_data, padded_length, crypt_data);
+    log_test_info_crypt(1, crypt_data, sizeof(key_192));
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        AES_ECB_decrypt(key_192, sizeof(key_192), crypt_data, padded_length, decrypted_data, &decrypted_length);
+        log_test_info_decrypt(i, decrypted_data);
+    }
+
+    ESP_LOGI(TEST, "Executing AES ECB decryption test with 256 key bits");
+    // Call to measurement sensor
+    AES_ECB_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
+    log_test_info_crypt(1, crypt_data, sizeof(key_256));
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    for(int i=1; i<=1000000; i++) {
+        AES_ECB_decrypt(key_256, sizeof(key_256), crypt_data, padded_length, decrypted_data, &decrypted_length);
+        log_test_info_decrypt(i, decrypted_data);
     }
 
     /* -------------- AES CBC Test -------------- */
@@ -803,7 +844,7 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
-    prepare_padded_data(data_string, DES_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for DES
+    prepare_padded_data(data_string, DES_BLOCK_SIZE, &padded_data, &crypt_data, &decrypted_data, &padded_length); // Padded data for DES
 
     /* -------------- DES ECB Test -------------- */
     ESP_LOGI(TEST, "Executing DES ECB encryption test with 64 key bits");
@@ -910,7 +951,7 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
 
-    prepare_padded_data(data_string, CAMELLIA_BLOCK_SIZE, &padded_data, &crypt_data, &padded_length); // Padded data for CAMELLIA
+    prepare_padded_data(data_string, CAMELLIA_BLOCK_SIZE, &padded_data, &crypt_data, &decrypted_data, &padded_length); // Padded data for CAMELLIA
 
     /* -------------- Camellia ECB Test -------------- */
     ESP_LOGI(TEST, "Executing CAMELLIA ECB encryption test with 128 key bits");
@@ -1109,24 +1150,25 @@ static void encrypt_hash_tests(const char *data_string)
     free(padded_data); */
 }
 
-// Function to prepare padded data for encryption with custom block size
-static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, size_t *padded_length) {
+// Function to prepare padded data for encryption using PKCS#7
+static void prepare_padded_data(const char *data_string, size_t block_size, unsigned char **padded_data, unsigned char **crypt_data, unsigned char **decrypt_data, size_t *padded_length) {
     // Obtener la longitud de data_string
     size_t data_length = strlen(data_string);
-    
-    // Calcular el número de bloques y el tamaño del último bloque con padding
-    size_t num_blocks = (data_length + block_size - 1) / block_size;
-    *padded_length = num_blocks * block_size;
+
+    // Calcular el número de bloques y el tamaño final con padding
+    size_t padding_size = block_size - (data_length % block_size);
+    *padded_length = data_length + padding_size;
 
     // Asignar memoria para crypt_data y padded_data
     *crypt_data = (unsigned char*) malloc(*padded_length);
     *padded_data = (unsigned char*) malloc(*padded_length);
+    *decrypt_data = (unsigned char*) malloc(*padded_length);
 
-    // Copiar data_string a padded_data y aplicar padding
+    // Copiar data_string a padded_data
     memcpy(*padded_data, data_string, data_length);
-    for (size_t i = data_length; i < *padded_length; i++) {
-        (*padded_data)[i] = (unsigned char)(*padded_length - data_length);
-    }
+
+    // Aplicar PKCS#7 padding: rellenar con el valor del tamaño de padding
+    memset(*padded_data + data_length, padding_size, padding_size);
 }
 
 // AES ECB Encrypt function
@@ -2020,6 +2062,7 @@ static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, 
         return;
     }
 
+    ESP_LOGI(TEST, "Cargar la clave pública");
     // Cargar la clave pública proporcionada
     ret = mbedtls_pk_parse_public_key(&pk, public_key, public_key_len);
     if (ret != 0) {
@@ -2027,6 +2070,7 @@ static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, 
         return;
     }
 
+    ESP_LOGI(TEST, "Comprobar que la clave cargada es de tipo RSA");
     // Comprueba que la clave cargada es de tipo RSA
     if (!mbedtls_pk_can_do(&pk, MBEDTLS_PK_RSA)) {
         ESP_LOGE(TEST, "La clave proporcionada no es una clave RSA.");
@@ -2034,11 +2078,13 @@ static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, 
         return;
     }
 
+    ESP_LOGI(TEST, "Configurar padding");
     // Obtén el contexto RSA y configura el padding
     mbedtls_rsa_context *rsa = mbedtls_pk_rsa(pk);
     size_t rsa_len = mbedtls_rsa_get_len(rsa); // Obtiene el tamaño de la clave en bytes
     mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, MBEDTLS_MD_SHA256);
 
+    ESP_LOGI(TEST, "Encriptar el texto plano en bloques");
     // Encripta el texto plano en bloques
     while (offset < plaintext_len) {
         // Copiar el bloque de datos
@@ -2067,4 +2113,41 @@ static void RSA_encrypt(const unsigned char *public_key, size_t public_key_len, 
     mbedtls_pk_free(&pk);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_entropy_free(&entropy);
+}
+
+// AES ECB Decrypt function
+static void AES_ECB_decrypt(const unsigned char *key, size_t key_size, const unsigned char *crypt_data, size_t crypt_data_len, unsigned char *plaintext, size_t *plaintext_len) {
+    mbedtls_aes_context aes;
+    unsigned char input[AES_BLOCK_BYTES];
+    unsigned char output[AES_BLOCK_BYTES];
+    size_t offset = 0;
+
+    // Inicializa el contexto de AES
+    mbedtls_aes_init(&aes);
+
+    // Configura la clave según el tamaño especificado
+    mbedtls_aes_setkey_dec(&aes, key, key_size * 8);
+
+    // Desencripta el texto cifrado en bloques de 16 bytes
+    while (offset < crypt_data_len) {
+        // Copiar el bloque de datos cifrados
+        memset(input, 0, AES_BLOCK_BYTES);
+        size_t block_size = (crypt_data_len - offset) > AES_BLOCK_BYTES ? AES_BLOCK_BYTES : (crypt_data_len - offset);
+        memcpy(input, crypt_data + offset, block_size);
+
+        // Desencriptar el bloque
+        mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_DECRYPT, input, output);
+
+        // Copiar el bloque desencriptado a plaintext
+        memcpy(plaintext + offset, output, AES_BLOCK_BYTES);
+        offset += AES_BLOCK_BYTES;
+    }
+
+    // Calcula la longitud original del texto plano eliminando el padding PKCS#7
+    unsigned char padding_size = plaintext[offset - 1];
+    *plaintext_len = crypt_data_len - padding_size;
+    memset(plaintext + *plaintext_len, 0, padding_size);
+
+    // Liberar recursos
+    mbedtls_aes_free(&aes);
 }
