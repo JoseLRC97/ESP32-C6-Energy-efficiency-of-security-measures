@@ -616,7 +616,7 @@ static void encrypt_hash_tests(const char *data_string)
 
     prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &decrypted_data, &padded_length); // Padded data for AES
 
-    /* -------------- AES ECB Test -------------- */
+    // -------------- AES ECB Test --------------
 
     ESP_LOGI(TEST, "Executing AES ECB encryption test with 128 key bits");
     // Call to measurement sensor
@@ -654,14 +654,14 @@ static void encrypt_hash_tests(const char *data_string)
         log_test_info_decrypt(i, decrypted_data);
     }
 
-    /* -------------- AES ECB Test Finished -------------- */
+    // -------------- AES ECB Test Finished --------------
 
-    /* -------------- AES CBC Test -------------- */
+    // -------------- AES CBC Test --------------
 
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 128 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=100000; i++) {
+    for(int i=1; i<=1000000; i++) {
         AES_CBC_encrypt(key_128, sizeof(key_128), padded_data, padded_length, crypt_data);
         log_test_info_crypt(i, crypt_data, sizeof(key_128));
     }
@@ -669,7 +669,7 @@ static void encrypt_hash_tests(const char *data_string)
     ESP_LOGI(TEST, "Executing AES CBC encryption test with 256 key bits");
     // Call to measurement sensor
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    for(int i=1; i<=100000; i++) {
+    for(int i=1; i<=1000000; i++) {
         AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
         log_test_info_crypt(i, crypt_data, sizeof(key_256));
     }
@@ -686,6 +686,7 @@ static void encrypt_hash_tests(const char *data_string)
 
     ESP_LOGI(TEST, "Executing AES CBC decryption test with 256 key bits");
     // Call to measurement sensor
+    prepare_padded_data(data_string, BLOCK_SIZE, &padded_data, &crypt_data, &decrypted_data, &padded_length); // Padded data for AES
     AES_CBC_encrypt(key_256, sizeof(key_256), padded_data, padded_length, crypt_data);
     log_test_info_crypt(1, crypt_data, sizeof(key_256));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
@@ -1161,7 +1162,7 @@ static void prepare_padded_data(const char *data_string, size_t block_size, unsi
     // Calcular el número de bloques y el tamaño final con padding
     size_t padding_size = block_size - (data_length % block_size);
     *padded_length = data_length + padding_size;
-
+    
     // Asignar memoria para crypt_data y padded_data
     *crypt_data = (unsigned char*) malloc(*padded_length);
     *padded_data = (unsigned char*) malloc(*padded_length);
@@ -1224,7 +1225,7 @@ static void AES_CBC_encrypt(const unsigned char *key, size_t key_size, const uns
     memcpy(crypt_data, iv, IV_SIZE);
 
     // Encripta el bloque en modo CBC usando el IV
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, iv, plaintext, crypt_data + AES_BLOCK_BYTES);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, plaintext_len, iv, plaintext, crypt_data + IV_SIZE);
 
     // Liberar recursos
     mbedtls_aes_free(&aes);
@@ -2171,15 +2172,7 @@ static void AES_CBC_decrypt(const unsigned char *key, size_t key_size, const uns
     // Extraer el IV desde el comienzo de los datos cifrados
     memcpy(iv, crypt_data, IV_SIZE);
 
-    // Desencripta el texto cifrado en bloques de 16 bytes, excluyendo el IV
-    while (offset < crypt_data_len) {
-        // Desencriptar el bloque actual
-        mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, AES_BLOCK_BYTES, iv, crypt_data + offset, output);
-
-        // Copiar el bloque desencriptado a plaintext
-        memcpy(plaintext + (offset - IV_SIZE), output, AES_BLOCK_BYTES);
-        offset += AES_BLOCK_BYTES;
-    }
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, crypt_data_len - IV_SIZE, iv, crypt_data + IV_SIZE, plaintext);
 
     // Calcular la longitud original del texto plano eliminando el padding PKCS#7
     size_t decrypted_len = crypt_data_len - IV_SIZE; // Longitud del texto cifrado menos el IV
